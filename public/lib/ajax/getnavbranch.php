@@ -19,18 +19,23 @@
  * This file is used to deliver a branch from the navigation structure
  * in XML format back to a page from an AJAX call
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package core
  * @copyright 2009 Sam Hemelryk
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 define('AJAX_SCRIPT', true);
+define('READ_ONLY_SESSION', true);
 
 /** Include config */
-require_once(dirname(__FILE__) . '/../../config.php');
+require_once(__DIR__ . '/../../config.php');
 /** Include course lib for its functions */
 require_once($CFG->dirroot.'/course/lib.php');
+
+if (!empty($CFG->forcelogin)) {
+    require_login();
+}
 
 try {
     // Start buffer capture so that we can `remove` any errors

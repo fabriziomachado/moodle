@@ -25,6 +25,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 require_once(__DIR__ . '/fixtures/event.php');
+require_once(__DIR__ . '/fixtures/store.php');
 
 class logstore_legacy_store_testcase extends advanced_testcase {
     public function test_log_writing() {
@@ -49,7 +50,7 @@ class logstore_legacy_store_testcase extends advanced_testcase {
         $this->assertEquals(array('logstore_legacy'), array_keys($stores));
         $store = $stores['logstore_legacy'];
         $this->assertInstanceOf('logstore_legacy\log\store', $store);
-        $this->assertInstanceOf('core\log\sql_select_reader', $store);
+        $this->assertInstanceOf('core\log\sql_reader', $store);
         $this->assertTrue($store->is_logging());
 
         $logs = $DB->get_records('log', array(), 'id ASC');
@@ -69,10 +70,10 @@ class logstore_legacy_store_testcase extends advanced_testcase {
 
         $this->setUser($user2);
         add_to_log($course1->id, 'xxxx', 'yyyy', '', '7', 0, 0);
-        //$this->assertDebuggingCalled();
+        $this->assertDebuggingCalled();
 
         add_to_log($course2->id, 'aaa', 'bbb', 'info.php', '666', $module2->cmid, $user1->id);
-        //$this->assertDebuggingCalled();
+        $this->assertDebuggingCalled();
 
         $logs = $DB->get_records('log', array(), 'id ASC');
         $this->assertCount(4, $logs);
@@ -142,7 +143,7 @@ class logstore_legacy_store_testcase extends advanced_testcase {
         \logstore_legacy\event\unittest_executed::create(
             array('context' => \context_system::instance(), 'other' => array('sample' => 5, 'xx' => 10)))->trigger();
         add_to_log($course1->id, 'xxxx', 'yyyy', '', '7', 0, 0);
-        //$this->assertDebuggingCalled();
+        $this->assertDebuggingCalled();
         $this->assertEquals(4, $DB->count_records('log'));
 
         // Another way to disable legacy completely.
@@ -153,11 +154,152 @@ class logstore_legacy_store_testcase extends advanced_testcase {
         \logstore_legacy\event\unittest_executed::create(
             array('context' => \context_system::instance(), 'other' => array('sample' => 5, 'xx' => 10)))->trigger();
         add_to_log($course1->id, 'xxxx', 'yyyy', '', '7', 0, 0);
-        //$this->assertDebuggingCalled();
+        $this->assertDebuggingCalled();
         $this->assertEquals(4, $DB->count_records('log'));
         // Set everything back.
         set_config('enabled_stores', '', 'tool_log');
         set_config('loglegacy', 0, 'logstore_legacy');
         get_log_manager(true);
+    }
+
+    /**
+     * Test replace_sql_legacy()
+     */
+    public function test_replace_sql_legacy() {
+        $selectwhere = "userid = :userid AND courseid = :courseid AND eventname = :eventname AND timecreated > :since";
+        $params = array('userid' => 2, 'since' => 3, 'courseid' => 4, 'eventname' => '\core\event\course_created');
+        $expectedselect = "module = 'course' AND action = 'new' AND userid = :userid AND url = :url AND time > :since";
+        $expectedparams = $params + array('url' => "view.php?id=4");
+
+        list($replaceselect, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals($replaceselect, $expectedselect);
+        $this->assertEquals($replaceparams, $expectedparams);
+
+        // Test CRUD related changes.
+        $selectwhere = "edulevel = 0";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals($selectwhere, $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud = 'u'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action LIKE '%update%'", $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud != 'u'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action NOT LIKE '%update%'", $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud <> 'u'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action NOT LIKE '%update%'", $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud = 'r'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action LIKE '%view%' OR action LIKE '%report%'", $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud != 'r'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action NOT LIKE '%view%' AND action NOT LIKE '%report%'", $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud <> 'r'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action NOT LIKE '%view%' AND action NOT LIKE '%report%'", $updatewhere);
+
+        // The slq is incorrect, since quotes must not be present. Make sure this is not parsed.
+        $selectwhere = "edulevel = 0 and 'crud' != 'u'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertNotEquals("edulevel = 0 and action NOT LIKE '%update%'", $updatewhere);
+
+        $selectwhere = "edulevel = 0 and crud = 'u' OR crud != 'r' or crud <> 'd'";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("edulevel = 0 and action LIKE '%update%' OR action NOT LIKE '%view%' AND action NOT LIKE '%report%' or action NOT LIKE '%delete%'", $updatewhere);
+
+        // The anonymous select returns all data.
+        $selectwhere = "anonymous = 0";
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertSame("0 = 0", $updatewhere);
+
+        // Test legacy field names are mapped.
+        $selectwhere = "timecreated = :timecreated and courseid = :courseid and contextinstanceid = :contextinstanceid and origin = :origin";
+        $params = array('timecreated' => 2, 'courseid' => 3, 'contextinstanceid' => 4, 'origin' => 5 );
+        $expectedparams = array('time' => 2, 'course' => 3, 'cmid' => 4, 'ip' => 5);
+        list($updatewhere, $replaceparams) = \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params);
+        $this->assertEquals("time = :time and course = :course and cmid = :cmid and ip = :ip", $updatewhere);
+        $this->assertSame($expectedparams, $replaceparams);
+
+        // Test sorting parameters.
+        $selectwhere = "courseid = 3";
+        $params = array();
+        $sort = 'timecreated DESC';
+        list($updatewhere, $replaceparams, $sort) =
+                \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params, $sort);
+        $this->assertSame('time DESC', $sort);
+
+        $sort = 'courseid DESC';
+        list($updatewhere, $replaceparams, $sort) =
+            \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params, $sort);
+        $this->assertSame('course DESC', $sort);
+
+        $sort = 'contextinstanceid DESC';
+        list($updatewhere, $replaceparams, $sort) =
+            \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params, $sort);
+        $this->assertSame('cmid DESC', $sort);
+
+        $sort = 'origin DESC';
+        list($updatewhere, $replaceparams, $sort) =
+            \logstore_legacy\test\unittest_logstore_legacy::replace_sql_legacy($selectwhere, $params, $sort);
+        $this->assertSame('ip DESC', $sort);
+    }
+
+    /*
+     * Test logmanager::get_supported_reports returns all reports that require this store.
+     */
+    public function test_get_supported_reports() {
+        $logmanager = get_log_manager();
+        $allreports = \core_component::get_plugin_list('report');
+
+        $supportedreports = array(
+            'report_log' => '/report/log',
+            'report_loglive' => '/report/loglive',
+            'report_outline' => '/report/outline',
+            'report_participation' => '/report/participation',
+            'report_stats' => '/report/stats'
+        );
+
+        // Make sure all supported reports are installed.
+        $expectedreports = array_keys(array_intersect_key($allreports, $supportedreports));
+        $reports = $logmanager->get_supported_reports('logstore_legacy');
+        $reports = array_keys($reports);
+        foreach ($expectedreports as $expectedreport) {
+            $this->assertContains($expectedreport, $reports);
+        }
+    }
+
+    /**
+     * Test that the legacy log cleanup works correctly.
+     */
+    public function test_cleanup_task() {
+        global $DB;
+
+        $this->resetAfterTest();
+
+        // Create some records spread over various days; test multiple iterations in cleanup.
+        $record = (object) array('time' => time());
+        $DB->insert_record('log', $record);
+        $record->time -= 3600 * 24 * 30;
+        $DB->insert_record('log', $record);
+        $record->time -= 3600 * 24 * 30;
+        $DB->insert_record('log', $record);
+        $record->time -= 3600 * 24 * 30;
+        $DB->insert_record('log', $record);
+        $this->assertEquals(4, $DB->count_records('log'));
+
+        // Remove all logs before "today".
+        set_config('loglifetime', 1);
+
+        $this->expectOutputString(" Deleted old legacy log records\n");
+        $clean = new \logstore_legacy\task\cleanup_task();
+        $clean->execute();
+
+        $this->assertEquals(1, $DB->count_records('log'));
     }
 }

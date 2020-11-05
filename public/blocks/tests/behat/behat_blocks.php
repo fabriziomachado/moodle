@@ -25,9 +25,9 @@
 
 // NOTE: no MOODLE_INTERNAL test here, this file may be required by behat before including /config.php.
 
-require_once(__DIR__ . '/../../../lib/behat/behat_base.php');
+use Behat\Mink\Exception\ElementNotFoundException as ElementNotFoundException;
 
-use Behat\Behat\Context\Step\Given as Given;
+require_once(__DIR__ . '/../../../lib/behat/behat_base.php');
 
 /**
  * Blocks management steps definitions.
@@ -46,30 +46,28 @@ class behat_blocks extends behat_base {
      * @param string $blockname
      */
     public function i_add_the_block($blockname) {
-        $steps = new Given('I set the field "bui_addblock" to "' . $this->escape($blockname) . '"');
+        $addblock = get_string('addblock');
+        $this->execute('behat_navigation::i_select_from_flat_navigation_drawer', $addblock);
 
-        // If we are running without javascript we need to submit the form.
         if (!$this->running_javascript()) {
-            $steps = array(
-                $steps,
-                new Given('I click on "' . get_string('go') . '" "button" in the "#add_block" "css_element"')
-            );
+            $this->execute('behat_general::i_click_on_in_the', [$blockname, 'link_exact', '#region-main', 'css_element']);
+        } else {
+            $this->execute('behat_general::i_click_on_in_the', [$blockname, 'link_exact', $addblock, 'dialogue']);
         }
-        return $steps;
     }
 
     /**
-     * Docks a block. Editing mode should be previously enabled.
+     * Adds the selected block if it is not already present. Editing mode must be previously enabled.
      *
-     * @Given /^I dock "(?P<block_name_string>(?:[^"]|\\")*)" block$/
+     * @Given /^I add the "(?P<block_name_string>(?:[^"]|\\")*)" block if not present$/
      * @param string $blockname
-     * @return Given
      */
-    public function i_dock_block($blockname) {
-
-        // Looking for both title and alt.
-        $xpath = "//input[@type='image'][@title='" . get_string('dockblock', 'block', $blockname) . "' or @alt='" . get_string('addtodock', 'block') . "']";
-        return new Given('I click on " ' . $xpath . '" "xpath_element" in the "' . $this->escape($blockname) . '" "block"');
+    public function i_add_the_block_if_not_present($blockname) {
+        try {
+            $this->get_text_selector_node('block', $blockname);
+        } catch (ElementNotFoundException $e) {
+            $this->execute('behat_blocks::i_add_the_block', [$blockname]);
+        }
     }
 
     /**
@@ -78,37 +76,80 @@ class behat_blocks extends behat_base {
      * @Given /^I open the "(?P<block_name_string>(?:[^"]|\\")*)" blocks action menu$/
      * @throws DriverException The step is not available when Javascript is disabled
      * @param string $blockname
-     * @return Given
      */
     public function i_open_the_blocks_action_menu($blockname) {
 
         if (!$this->running_javascript()) {
-            throw new DriverException('Blocks action menu not available when Javascript is disabled');
-        }
-
-        // If it is already opened we do nothing.
-        $blocknode = $this->get_block_node($blockname);
-        $classes = array_flip(explode(' ', $blocknode->getAttribute('class')));
-        if (!empty($classes['action-menu-shown'])) {
+            // Action menu does not need to be open if Javascript is off.
             return;
         }
 
-        return new Given('I click on "a[role=\'menuitem\']" "css_element" in the "' . $this->escape($blockname) . '" "block"');
+        // If it is already opened we do nothing.
+        $blocknode = $this->get_text_selector_node('block', $blockname);
+        if ($blocknode->hasClass('action-menu-shown')) {
+            return;
+        }
+
+        $this->execute('behat_general::i_click_on_in_the',
+                array("a[data-toggle='dropdown']", "css_element", $this->escape($blockname), "block")
+        );
     }
 
     /**
-     * Returns the DOM node of the block from <div>.
+     * Clicks on Configure block for specified block. Page must be in editing mode.
      *
-     * @throws ElementNotFoundException Thrown by behat_base::find
-     * @param string $blockname The block name
-     * @return NodeElement
+     * Argument block_name may be either the name of the block or CSS class of the block.
+     *
+     * @Given /^I configure the "(?P<block_name_string>(?:[^"]|\\")*)" block$/
+     * @param string $blockname
      */
-    protected function get_block_node($blockname) {
+    public function i_configure_the_block($blockname) {
+        // Note that since $blockname may be either block name or CSS class, we can not use the exact label of "Configure" link.
 
-        $blockname = $this->getSession()->getSelectorsHandler()->xpathLiteral($blockname);
-        $xpath = "//div[contains(concat(' ', normalize-space(@class), ' '), ' block ')][contains(., $blockname)]";
+        $this->execute("behat_blocks::i_open_the_blocks_action_menu", $this->escape($blockname));
 
-        return $this->find('xpath', $xpath);
+        $this->execute('behat_general::i_click_on_in_the',
+            array("Configure", "link", $this->escape($blockname), "block")
+        );
     }
 
+    /**
+     * Ensures that block can be added to the page but does not actually add it.
+     *
+     * @Then /^the add block selector should contain "(?P<block_name_string>(?:[^"]|\\")*)" block$/
+     * @param string $blockname
+     */
+    public function the_add_block_selector_should_contain_block($blockname) {
+        $addblock = get_string('addblock');
+        $this->execute('behat_navigation::i_select_from_flat_navigation_drawer', $addblock);
+
+        $cancelstr = get_string('cancel');
+        if (!$this->running_javascript()) {
+            $this->execute('behat_general::should_exist_in_the', [$blockname, 'link_exact', '#region-main', 'css_element']);
+            $this->execute('behat_general::i_click_on_in_the', [$cancelstr, 'link_exact', '#region-main', 'css_element']);
+        } else {
+            $this->execute('behat_general::should_exist_in_the', [$blockname, 'link_exact', $addblock, 'dialogue']);
+            $this->execute('behat_general::i_click_on_in_the', [$cancelstr, 'button', $addblock, 'dialogue']);
+        }
+    }
+
+    /**
+     * Ensures that block can not be added to the page.
+     *
+     * @Then /^the add block selector should not contain "(?P<block_name_string>(?:[^"]|\\")*)" block$/
+     * @param string $blockname
+     */
+    public function the_add_block_selector_should_not_contain_block($blockname) {
+        $addblock = get_string('addblock');
+        $this->execute('behat_navigation::i_select_from_flat_navigation_drawer', $addblock);
+
+        $cancelstr = get_string('cancel');
+        if (!$this->running_javascript()) {
+            $this->execute('behat_general::should_not_exist_in_the', [$blockname, 'link_exact', '#region-main', 'css_element']);
+            $this->execute('behat_general::i_click_on_in_the', [$cancelstr, 'link_exact', '#region-main', 'css_element']);
+        } else {
+            $this->execute('behat_general::should_not_exist_in_the', [$blockname, 'link_exact', $addblock, 'dialogue']);
+            $this->execute('behat_general::i_click_on_in_the', [$cancelstr, 'button', $addblock, 'dialogue']);
+        }
+    }
 }

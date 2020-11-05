@@ -1,5 +1,17 @@
 YUI.add('moodle-core-chooserdialogue', function (Y, NAME) {
 
+/**
+ * A type of dialogue used as for choosing options.
+ *
+ * @module moodle-core-chooserdialogue
+ */
+
+/**
+ * A type of dialogue used as for choosing options.
+ *
+ * @constructor
+ * @class M.core.chooserdialogue
+ */
 var CHOOSERDIALOGUE = function() {
     CHOOSERDIALOGUE.superclass.constructor.apply(this, arguments);
 };
@@ -9,47 +21,51 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
     panel: null,
 
     // The submit button - we disable this until an element is set
-    submitbutton : null,
+    submitbutton: null,
 
     // The chooserdialogue container
-    container : null,
+    container: null,
 
     // Any event listeners we may need to cancel later
-    listenevents : [],
+    listenevents: [],
 
-    bodycontent : null,
-    headercontent : null,
-    instanceconfig : null,
+    bodycontent: null,
+    headercontent: null,
+    instanceconfig: null,
 
     // The hidden field storing the disabled element values for submission.
     hiddenRadioValue: null,
 
-    setup_chooser_dialogue : function(bodycontent, headercontent, config) {
+    setup_chooser_dialogue: function(bodycontent, headercontent, config) {
         this.bodycontent = bodycontent;
         this.headercontent = headercontent;
         this.instanceconfig = config;
     },
 
-    prepare_chooser : function () {
+    prepare_chooser: function() {
         if (this.panel) {
             return;
         }
 
+        // Ensure that we're showing the JS version of the chooser.
+        Y.one(Y.config.doc.body).addClass('jschooser');
+
         // Set Default options
         var paramkey,
             params = {
-            bodyContent : this.bodycontent.get('innerHTML'),
-            headerContent : this.headercontent.get('innerHTML'),
-            width : '540px',
-            draggable : true,
-            visible : false, // Hide by default
-            zindex : 100, // Display in front of other items
-            modal: true, // This dialogue should be modal.
-            shim : true,
-            closeButtonTitle : this.get('closeButtonTitle'),
-            focusOnPreviousTargetAfterHide: true,
-            render : false
-        };
+                bodyContent: this.bodycontent.get('innerHTML'),
+                headerContent: this.headercontent.get('innerHTML'),
+                width: '540px',
+                draggable: true,
+                visible: false, // Hide by default
+                zindex: 100, // Display in front of other items
+                modal: true, // This dialogue should be modal.
+                shim: true,
+                closeButtonTitle: this.get('closeButtonTitle'),
+                focusOnPreviousTargetAfterHide: true,
+                render: false,
+                extraClasses: this._getClassNames()
+            };
 
         // Override with additional options
         for (paramkey in this.instanceconfig) {
@@ -83,10 +99,10 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
     /**
       * Display the module chooser
       *
-      * @param e Event Triggering Event
-      * @return void
+      * @method display_chooser
+      * @param {EventFacade} e Triggering Event
       */
-    display_chooser : function (e) {
+    display_chooser: function(e) {
         var bb, dialogue, thisevent;
         this.prepare_chooser();
 
@@ -169,14 +185,14 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
     },
 
     /**
-      * Cancel any listen events in the listenevents queue
-      *
-      * Several locations add event handlers which should only be called before the form is submitted. This provides
-      * a way of cancelling those events.
-      *
-      * @return void
-      */
-    cancel_listenevents : function () {
+     * Cancel any listen events in the listenevents queue
+     *
+     * Several locations add event handlers which should only be called before the form is submitted. This provides
+     * a way of cancelling those events.
+     *
+     * @method cancel_listenevents
+     */
+    cancel_listenevents: function() {
         // Detach all listen events to prevent duplicate triggers
         var thisevent;
         while (this.listenevents.length) {
@@ -191,16 +207,18 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
       * This tries to set a sensible maximum and minimum to ensure that some options are always shown, and preferably
       * all, whilst fitting the box within the current viewport.
       *
-      * @param dialogue Y.Node The dialogue
-      * @return void
+      * @method center_dialogue
+      * @param Node {dialogue} Y.Node The dialogue
       */
-    center_dialogue : function(dialogue) {
+    center_dialogue: function(dialogue) {
         var bb = this.panel.get('boundingBox'),
             winheight = bb.get('winHeight'),
             newheight, totalheight;
 
         if (this.panel.shouldResizeFullscreen()) {
-            // No custom sizing required for a fullscreen dialog.
+            dialogue.setStyle('maxHeight', '100%');
+            dialogue.setStyle('height', 'auto');
+            this.panel.makeResponsive();
             return;
         }
 
@@ -221,7 +239,7 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
         if (newheight > this.get('minheight')) {
             // Disable the page scrollbars.
             if (this.panel.lockScroll && !this.panel.lockScroll.isActive()) {
-                this.panel.lockScroll.enableScrollLock();
+                this.panel.lockScroll.enableScrollLock(true);
             }
         } else {
             // Re-enable the page scrollbars.
@@ -230,13 +248,13 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
             }
         }
 
-        // Take off 15px top and bottom for borders, plus 40px each for the title and button area before setting the
-        // new max-height
+        // Take off 15px top and bottom for borders, plus 69px for the title and 57px for the
+        // button area before setting the new max-height.
         totalheight = newheight;
-        newheight = newheight - (15 + 15 + 40 + 40);
+        newheight = newheight - (69 + 57 + 15 + 15);
         dialogue.setStyle('maxHeight', newheight + 'px');
 
-        dialogueheight = bb.getStyle('height');
+        var dialogueheight = bb.getStyle('height');
         if (dialogueheight.match(/.*px$/)) {
             dialogueheight = dialogueheight.replace(/px$/, '');
         } else {
@@ -246,24 +264,26 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
         if (dialogueheight < this.get('baseheight')) {
             dialogueheight = this.get('baseheight');
             dialogue.setStyle('height', dialogueheight + 'px');
+        } else {
+            dialogue.setStyle('height', 'auto');
         }
 
         this.panel.centerDialogue();
     },
 
-    handle_key_press : function(e) {
+    handle_key_press: function(e) {
         if (e.keyCode === 27) {
             this.cancel_popup(e);
         }
     },
 
-    cancel_popup : function (e) {
+    cancel_popup: function(e) {
         // Prevent normal form submission before hiding
         e.preventDefault();
         this.hide();
     },
 
-    hide : function() {
+    hide: function() {
         // Cancel all listen events
         this.cancel_listenevents();
 
@@ -271,7 +291,7 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
         this.panel.hide();
     },
 
-    check_options : function() {
+    check_options: function() {
         // Check which options are set, and change the parent class
         // to show/hide help as required
         this.options.each(function(thisoption) {
@@ -293,7 +313,7 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
         }, this);
     },
 
-    option_selected : function(e) {
+    option_selected: function(e) {
         // Set a hidden input field with the value and name of the radio button.  When we submit the form, we
         // disable the radios to prevent duplicate submission. This has the result however that the value is never
         // submitted so we set this value to a hidden field instead
@@ -301,23 +321,87 @@ Y.extend(CHOOSERDIALOGUE, Y.Base, {
             value: e.get('value'),
             name: e.get('name')
         });
+    },
+
+    /**
+     * Return an array of class names prefixed with 'chooserdialogue-' and
+     * the name of the type of dialogue.
+     *
+     * Note: Class name are converted to lower-case.
+     *
+     * If an array of arguments is supplied, each of these is prefixed and
+     * lower-cased also.
+     *
+     * If no arguments are supplied, then the prefix is returned on it's
+     * own.
+     *
+     * @method _getClassNames
+     * @param {Array} [args] Any additional names to prefix and lower-case.
+     * @return {Array}
+     * @private
+     */
+    _getClassNames: function(args) {
+        var prefix = 'chooserdialogue-' + this.name,
+            results = [];
+
+        results.push(prefix.toLowerCase());
+        if (args) {
+            var arg;
+            for (arg in args) {
+                results.push((prefix + '-' + arg).toLowerCase());
+            }
+        }
+
+        return results;
     }
 },
 {
-    NAME : 'moodle-core-chooserdialogue',
-    ATTRS : {
-        minheight : {
-            value : 300
+    NAME: 'moodle-core-chooserdialogue',
+    ATTRS: {
+        /**
+         * The minimum height (in pixels) before resizing is prevented and scroll
+         * locking disabled.
+         *
+         * @attribute minheight
+         * @type Number
+         * @default 300
+         */
+        minheight: {
+            value: 300
         },
+
+        /**
+         * The base height??
+         *
+         * @attribute baseheight
+         * @type Number
+         * @default 400
+         */
         baseheight: {
-            value : 400
+            value: 400
         },
-        maxheight : {
-            value : 660
+
+        /**
+         * The maximum height (in pixels) at which we stop resizing.
+         *
+         * @attribute maxheight
+         * @type Number
+         * @default 300
+         */
+        maxheight: {
+            value: 660
         },
-        closeButtonTitle : {
-            validator : Y.Lang.isString,
-            value : 'Close'
+
+        /**
+         * The title of the close button.
+         *
+         * @attribute closeButtonTitle
+         * @type String
+         * @default 'Close'
+         */
+        closeButtonTitle: {
+            validator: Y.Lang.isString,
+            value: 'Close'
         }
     }
 });

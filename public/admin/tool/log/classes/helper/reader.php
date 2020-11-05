@@ -63,13 +63,43 @@ trait reader {
     }
 
     /**
-     * If the current user can access current store or not.
+     * Function decodes the other field into an array using either PHP serialisation or JSON.
      *
-     * @param \context $context
+     * Note that this does not rely on the config setting, it supports both formats, so you can
+     * use it for data before/after making a change to the config setting.
      *
-     * @return bool
+     * The return value is usually an array but it can also be null or a boolean or something.
+     *
+     * @param string $other Other value
+     * @return mixed Decoded value
      */
-    public function can_access(\context $context) {
-        return has_capability('logstore/' . $this->store . ':read', $context);
+    public static function decode_other(?string $other) {
+        if ($other === 'N;' || preg_match('~^.:~', $other)) {
+            return unserialize($other);
+        } else {
+            return json_decode($other, true);
+        }
+    }
+
+    /**
+     * Adds ID column to $sort to make sure events from one request
+     * within 1 second are returned in the same order.
+     *
+     * @param string $sort
+     * @return string sort string
+     */
+    protected static function tweak_sort_by_id($sort) {
+        if (empty($sort)) {
+            // Mysql does this - unlikely to be used in real life because $sort is always expected.
+            $sort = "id ASC";
+        } else if (stripos($sort, 'timecreated') === false) {
+            $sort .= ", id ASC";
+        } else if (stripos($sort, 'timecreated DESC') !== false) {
+            $sort .= ", id DESC";
+        } else {
+            $sort .= ", id ASC";
+        }
+
+        return $sort;
     }
 }

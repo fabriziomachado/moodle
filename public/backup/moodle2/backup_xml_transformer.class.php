@@ -85,6 +85,10 @@ class backup_xml_transformer extends xml_contenttransformer {
         }
 
         $content = $this->process_filephp_links($content); // Replace all calls to file.php by $@FILEPHP@$ in a normalised way
+
+        // Replace all calls to h5p/embed.php by $@H5PEMBED@$.
+        $content = $this->process_h5pembedphp_links($content);
+
         $content = $this->encode_absolute_links($content); // Pass the content against all the found encoders
 
         return $content;
@@ -118,6 +122,25 @@ class backup_xml_transformer extends xml_contenttransformer {
         $content = preg_replace_callback($search, array('backup_xml_transformer', 'process_filephp_uses'), $content);
 
         return $content;
+    }
+
+    /**
+     * Replace all calls to /h5p/embed.php by $@H5PEMBED@$
+     * to allow restore the /h5p/embed.php url in
+     * other domains.
+     *
+     * @param  string $content
+     * @return string
+     */
+    private function process_h5pembedphp_links($content) {
+        global $CFG;
+
+        // No /h5p/embed.php, nothing to convert.
+        if (strpos($content, '/h5p/embed.php') === false) {
+            return $content;
+        }
+
+        return str_replace($CFG->wwwroot.'/h5p/embed.php', '$@H5PEMBED@$', $content);
     }
 
     private function encode_absolute_links($content) {
@@ -159,7 +182,7 @@ class backup_xml_transformer extends xml_contenttransformer {
         // Add the module ones. Each module supporting moodle2 backups MUST have it
         $mods = core_component::get_plugin_list('mod');
         foreach ($mods as $mod => $moddir) {
-            if (plugin_supports('mod', $mod, FEATURE_BACKUP_MOODLE2)) {
+            if (plugin_supports('mod', $mod, FEATURE_BACKUP_MOODLE2) && class_exists('backup_' . $mod . '_activity_task')) {
                 $encoders['backup_' . $mod . '_activity_task'] = 'encode_content_links';
             }
         }

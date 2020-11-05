@@ -39,6 +39,8 @@ class core_grade_grade_testcase extends grade_base_testcase {
         $this->sub_test_grade_grade_is_locked();
         $this->sub_test_grade_grade_set_hidden();
         $this->sub_test_grade_grade_is_hidden();
+        $this->sub_test_grade_grade_deleted();
+        $this->sub_test_grade_grade_deleted_event();
     }
 
     protected function sub_test_grade_grade_construct() {
@@ -192,5 +194,380 @@ class core_grade_grade_testcase extends grade_base_testcase {
 
         $grade->hidden = time()+666;
         $this->assertTrue($grade->is_hidden());
+    }
+
+    public function test_flatten_dependencies() {
+        // First test a simple normal case.
+        $a = array(1 => array(2, 3), 2 => array(), 3 => array(4), 4 => array());
+        $b = array();
+        $expecteda = array(1 => array(2, 3, 4), 2 => array(), 3 => array(4), 4 => array());
+        $expectedb = array(1 => 1);
+
+        test_grade_grade_flatten_dependencies_array::test_flatten_dependencies_array($a, $b);
+        $this->assertSame($expecteda, $a);
+        $this->assertSame($expectedb, $b);
+
+        // Edge case - empty arrays.
+        $a = $b = $expecteda = $expectedb = array();
+
+        test_grade_grade_flatten_dependencies_array::test_flatten_dependencies_array($a, $b);
+        $this->assertSame($expecteda, $a);
+        $this->assertSame($expectedb, $b);
+
+        // Circular dependency.
+        $a = array(1 => array(2), 2 => array(3), 3 => array(1));
+        $b = array();
+        $expecteda = array(1 => array(1, 2, 3), 2 => array(1, 2, 3), 3 => array(1, 2, 3));
+
+        test_grade_grade_flatten_dependencies_array::test_flatten_dependencies_array($a, $b);
+        $this->assertSame($expecteda, $a);
+        // Note - we don't test the depth when we got circular dependencies - the main thing we wanted to test was that there was
+        // no ka-boom. The result would be hard to understand and doesn't matter.
+
+        // Circular dependency 2.
+        $a = array(1 => array(2), 2 => array(3), 3 => array(4), 4 => array(2, 1));
+        $b = array();
+        $expecteda = array(1 => array(1, 2, 3, 4), 2 => array(1, 2, 3, 4), 3 => array(1, 2, 3, 4), 4 => array(1, 2, 3, 4));
+
+        test_grade_grade_flatten_dependencies_array::test_flatten_dependencies_array($a, $b);
+        $this->assertSame($expecteda, $a);
+    }
+
+    public function test_grade_grade_min_max() {
+        global $CFG;
+        $initialminmaxtouse = $CFG->grade_minmaxtouse;
+
+        $this->setAdminUser();
+        $course = $this->getDataGenerator()->create_course();
+        $user = $this->getDataGenerator()->create_user();
+        $assignrecord = $this->getDataGenerator()->create_module('assign', array('course' => $course, 'grade' => 100));
+        $cm = get_coursemodule_from_instance('assign', $assignrecord->id);
+        $assigncontext = context_module::instance($cm->id);
+        $assign = new assign($assigncontext, $cm, $course);
+
+        // Fetch the assignment item.
+        $giparams = array('itemtype' => 'mod', 'itemmodule' => 'assign', 'iteminstance' => $assignrecord->id,
+                'courseid' => $course->id, 'itemnumber' => 0);
+        $gi = grade_item::fetch($giparams);
+        $this->assertEquals(0, $gi->grademin);
+        $this->assertEquals(100, $gi->grademax);
+
+        // Give a grade to the student.
+        $usergrade = $assign->get_user_grade($user->id, true);
+        $usergrade->grade = 10;
+        $assign->update_grade($usergrade);
+
+        // Check the grade stored in gradebook.
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(10, $gg->rawgrade);
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Change the min/max grade of the item.
+        $gi->grademax = 50;
+        $gi->grademin = 2;
+        $gi->update();
+
+        // Fetch the updated item.
+        $gi = grade_item::fetch($giparams);
+
+        // Now check the grade grade min/max with system setting.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_ITEM;
+        grade_set_setting($course->id, 'minmaxtouse', null); // Ensure no course setting.
+
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(2, $gg->get_grade_min());
+        $this->assertEquals(50, $gg->get_grade_max());
+
+        // Now with other system setting.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_GRADE;
+        grade_set_setting($course->id, 'minmaxtouse', null); // Ensure no course setting, and reset static cache.
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Now with overriden setting in course.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_ITEM;
+        grade_set_setting($course->id, 'minmaxtouse', GRADE_MIN_MAX_FROM_GRADE_GRADE);
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_GRADE;
+        grade_set_setting($course->id, 'minmaxtouse', GRADE_MIN_MAX_FROM_GRADE_ITEM);
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(2, $gg->get_grade_min());
+        $this->assertEquals(50, $gg->get_grade_max());
+
+        $CFG->grade_minmaxtouse = $initialminmaxtouse;
+    }
+
+    public function test_grade_grade_min_max_with_course_item() {
+        global $CFG, $DB;
+        $initialminmaxtouse = $CFG->grade_minmaxtouse;
+
+        $this->setAdminUser();
+        $course = $this->getDataGenerator()->create_course();
+        $user = $this->getDataGenerator()->create_user();
+        $gi = grade_item::fetch_course_item($course->id);
+
+        // Fetch the category item.
+        $this->assertEquals(0, $gi->grademin);
+        $this->assertEquals(100, $gi->grademax);
+
+        // Give a grade to the student.
+        $gi->update_final_grade($user->id, 10);
+
+        // Check the grade min/max stored in gradebook.
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Change the min/max grade of the item.
+        $gi->grademin = 2;
+        $gi->grademax = 50;
+        $gi->update();
+
+        // Fetch the updated item.
+        $gi = grade_item::fetch_course_item($course->id);
+
+        // Now check the grade grade min/max with system setting.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_ITEM;
+        grade_set_setting($course->id, 'minmaxtouse', null); // Ensure no course setting.
+
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Now with other system setting.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_GRADE;
+        grade_set_setting($course->id, 'minmaxtouse', null); // Ensure no course setting, and reset static cache.
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Now with overriden setting in course.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_ITEM;
+        grade_set_setting($course->id, 'minmaxtouse', GRADE_MIN_MAX_FROM_GRADE_GRADE);
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_GRADE;
+        grade_set_setting($course->id, 'minmaxtouse', GRADE_MIN_MAX_FROM_GRADE_ITEM);
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        $CFG->grade_minmaxtouse = $initialminmaxtouse;
+    }
+
+    public function test_grade_grade_min_max_with_category_item() {
+        global $CFG, $DB;
+        $initialminmaxtouse = $CFG->grade_minmaxtouse;
+
+        $this->setAdminUser();
+        $course = $this->getDataGenerator()->create_course();
+        $user = $this->getDataGenerator()->create_user();
+        $coursegi = grade_item::fetch_course_item($course->id);
+
+        // Create a category item.
+        $gc = new grade_category(array('courseid' => $course->id, 'fullname' => 'test'), false);
+        $gc->insert();
+        $gi = $gc->get_grade_item();
+        $gi->grademax = 100;
+        $gi->grademin = 0;
+        $gi->update();
+
+        // Fetch the category item.
+        $giparams = array('itemtype' => 'category', 'iteminstance' => $gc->id);
+        $gi = grade_item::fetch($giparams);
+        $this->assertEquals(0, $gi->grademin);
+        $this->assertEquals(100, $gi->grademax);
+
+        // Give a grade to the student.
+        $gi->update_final_grade($user->id, 10);
+
+        // Check the grade min/max stored in gradebook.
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Change the min/max grade of the item.
+        $gi->grademin = 2;
+        $gi->grademax = 50;
+        $gi->update();
+
+        // Fetch the updated item.
+        $gi = grade_item::fetch($giparams);
+
+        // Now check the grade grade min/max with system setting.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_ITEM;
+        grade_set_setting($course->id, 'minmaxtouse', null); // Ensure no course setting.
+
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Now with other system setting.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_GRADE;
+        grade_set_setting($course->id, 'minmaxtouse', null); // Ensure no course setting, and reset static cache.
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        // Now with overriden setting in course.
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_ITEM;
+        grade_set_setting($course->id, 'minmaxtouse', GRADE_MIN_MAX_FROM_GRADE_GRADE);
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        $CFG->grade_minmaxtouse = GRADE_MIN_MAX_FROM_GRADE_GRADE;
+        grade_set_setting($course->id, 'minmaxtouse', GRADE_MIN_MAX_FROM_GRADE_ITEM);
+        $gg = grade_grade::fetch(array('userid' => $user->id, 'itemid' => $gi->id));
+        $this->assertEquals(0, $gg->get_grade_min());
+        $this->assertEquals(100, $gg->get_grade_max());
+
+        $CFG->grade_minmaxtouse = $initialminmaxtouse;
+    }
+
+    /**
+     * Tests when a grade_grade has been deleted.
+     */
+    public function sub_test_grade_grade_deleted() {
+        $dg = $this->getDataGenerator();
+
+        // Create the data we need for the tests.
+        $fs = new file_storage();
+        $u1 = $dg->create_user();
+        $c1 = $dg->create_course();
+        $a1 = $dg->create_module('assign', ['course' => $c1->id]);
+        $a1context = context_module::instance($a1->cmid);
+
+        $gi = new grade_item($dg->create_grade_item(
+            [
+                'courseid' => $c1->id,
+                'itemtype' => 'mod',
+                'itemmodule' => 'assign',
+                'iteminstance' => $a1->id
+            ]
+        ), false);
+
+        // Add feedback files to copy as our update.
+        $this->add_feedback_file_to_copy();
+
+        $grades['feedback'] = 'Nice feedback!';
+        $grades['feedbackformat'] = FORMAT_MOODLE;
+        $grades['feedbackfiles'] = [
+            'contextid' => 1,
+            'component' => 'test',
+            'filearea' => 'testarea',
+            'itemid' => 1
+        ];
+
+        $grades['userid'] = $u1->id;
+        grade_update('mod/assign', $gi->courseid, $gi->itemtype, $gi->itemmodule, $gi->iteminstance,
+            $gi->itemnumber, $grades);
+
+        // Feedback file area.
+        $files = $fs->get_area_files($a1context->id, GRADE_FILE_COMPONENT, GRADE_FEEDBACK_FILEAREA);
+        $this->assertEquals(2, count($files));
+
+        // History file area.
+        $files = $fs->get_area_files($a1context->id, GRADE_FILE_COMPONENT, GRADE_HISTORY_FEEDBACK_FILEAREA);
+        $this->assertEquals(2, count($files));
+
+        $gg = grade_grade::fetch(array('userid' => $u1->id, 'itemid' => $gi->id));
+
+        $gg->delete();
+
+        // Feedback file area.
+        $files = $fs->get_area_files($a1context->id, GRADE_FILE_COMPONENT, GRADE_FEEDBACK_FILEAREA);
+        $this->assertEquals(0, count($files));
+
+        // History file area.
+        $files = $fs->get_area_files($a1context->id, GRADE_FILE_COMPONENT, GRADE_HISTORY_FEEDBACK_FILEAREA);
+        $this->assertEquals(2, count($files));
+    }
+
+    /**
+     * Creates a feedback file to copy to the gradebook area.
+     */
+    private function add_feedback_file_to_copy() {
+        $dummy = array(
+            'contextid' => 1,
+            'component' => 'test',
+            'filearea' => 'testarea',
+            'itemid' => 1,
+            'filepath' => '/',
+            'filename' => 'feedback1.txt'
+        );
+
+        $fs = get_file_storage();
+        $fs->create_file_from_string($dummy, '');
+    }
+
+    /**
+     * Tests grade_deleted event.
+     */
+    public function sub_test_grade_grade_deleted_event() {
+        global $DB;
+        $dg = $this->getDataGenerator();
+
+        // Create the data we need for the tests.
+        $u1 = $dg->create_user();
+        $u2 = $dg->create_user();
+        $c1 = $dg->create_course();
+        $a1 = $dg->create_module('assign', ['course' => $c1->id]);
+
+        $gi = new grade_item($dg->create_grade_item(
+            [
+                'courseid' => $c1->id,
+                'itemtype' => 'mod',
+                'itemmodule' => 'assign',
+                'iteminstance' => $a1->id
+            ]
+        ), false);
+
+        grade_update('mod/assign', $gi->courseid, $gi->itemtype, $gi->itemmodule, $gi->iteminstance,
+            $gi->itemnumber, ['userid' => $u1->id]);
+        grade_update('mod/assign', $gi->courseid, $gi->itemtype, $gi->itemmodule, $gi->iteminstance,
+            $gi->itemnumber, ['userid' => $u2->id]);
+
+        $gg = grade_grade::fetch(array('userid' => $u1->id, 'itemid' => $gi->id));
+        $this->assertEquals($u1->id, $gg->userid);
+        $gg->load_grade_item();
+        $this->assertEquals($gi->id, $gg->grade_item->id);
+
+        // Delete user with valid grade item.
+        $sink = $this->redirectEvents();
+        grade_user_delete($u1->id);
+        $events = $sink->get_events();
+        $event = reset($events);
+        $sink->close();
+        $this->assertInstanceOf('core\event\grade_deleted', $event);
+
+        $gg = grade_grade::fetch(array('userid' => $u2->id, 'itemid' => $gi->id));
+        $this->assertEquals($u2->id, $gg->userid);
+        $gg->load_grade_item();
+        $this->assertEquals($gi->id, $gg->grade_item->id);
+
+        // Delete grade item, mock up orphaned grade_grades.
+        $DB->delete_records('grade_items', ['id' => $gi->id]);
+        $gg = grade_grade::fetch(array('userid' => $u2->id, 'itemid' => $gi->id));
+        $this->assertEquals($u2->id, $gg->userid);
+
+        // No event is triggered and there is a debugging message.
+        $sink = $this->redirectEvents();
+        grade_user_delete($u2->id);
+        $this->assertDebuggingCalled("Missing grade item id $gi->id");
+        $events = $sink->get_events();
+        $sink->close();
+        $this->assertEmpty($events);
+
+        // The grade should be deleted.
+        $gg = grade_grade::fetch(array('userid' => $u2->id, 'itemid' => $gi->id));
+        $this->assertEmpty($gg);
     }
 }

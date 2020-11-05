@@ -25,6 +25,10 @@
 defined('MOODLE_INTERNAL') || die();
 
 require_once($CFG->dirroot.'/grade/grading/form/lib.php');
+require_once($CFG->dirroot.'/lib/filelib.php');
+
+/** rubric: Used to compare our gradeitem_type against. */
+const RUBRIC = 'rubric';
 
 /**
  * This controller encapsulates the rubric grading logic
@@ -143,8 +147,16 @@ class gradingform_rubric_controller extends gradingform_controller {
         // reload the definition from the database
         $currentdefinition = $this->get_definition(true);
 
-        // update rubric data
         $haschanges = array();
+
+        // Check if 'lockzeropoints' option has changed.
+        $newlockzeropoints = $newdefinition->rubric['options']['lockzeropoints'];
+        $currentoptions = $this->get_options();
+        if ((bool)$newlockzeropoints != (bool)$currentoptions['lockzeropoints']) {
+            $haschanges[3] = true;
+        }
+
+        // update rubric data
         if (empty($newdefinition->rubric['criteria'])) {
             $newcriteria = array();
         } else {
@@ -203,10 +215,7 @@ class gradingform_rubric_controller extends gradingform_controller {
             }
             foreach ($levelsdata as $levelid => $level) {
                 if (isset($level['score'])) {
-                    $level['score'] = (float)$level['score'];
-                    if ($level['score']<0) {
-                        $level['score'] = 0;
-                    }
+                    $level['score'] = unformat_float($level['score']);
                 }
                 if (preg_match('/^NEWID\d+$/', $levelid)) {
                     // insert level into DB
@@ -354,6 +363,7 @@ class gradingform_rubric_controller extends gradingform_controller {
     public static function get_default_options() {
         $options = array(
             'sortlevelsasc' => 1,
+            'lockzeropoints' => 1,
             'alwaysshowdefinition' => 1,
             'showdescriptionteacher' => 1,
             'showdescriptionstudent' => 1,
@@ -368,14 +378,22 @@ class gradingform_rubric_controller extends gradingform_controller {
     /**
      * Gets the options of this rubric definition, fills the missing options with default values
      *
+     * The only exception is 'lockzeropoints' - if other options are present in the json string but this
+     * one is absent, this means that the rubric was created before Moodle 3.2 and the 0 value should be used.
+     *
      * @return array
      */
     public function get_options() {
         $options = self::get_default_options();
         if (!empty($this->definition->options)) {
-            $thisoptions = json_decode($this->definition->options);
+            $thisoptions = json_decode($this->definition->options, true); // Assoc. array is expected.
             foreach ($thisoptions as $option => $value) {
                 $options[$option] = $value;
+            }
+            if (!array_key_exists('lockzeropoints', $thisoptions)) {
+                // Rubrics created before Moodle 3.2 don't have 'lockzeropoints' option. In this case they should not
+                // assume default value 1 but use "legacy" value 0.
+                $options['lockzeropoints'] = 0;
             }
         }
         return $options;
@@ -522,7 +540,10 @@ class gradingform_rubric_controller extends gradingform_controller {
             $rubric .= $output->box($this->get_formatted_description(), 'gradingform_rubric-description');
         }
         if (has_capability('moodle/grade:managegradingforms', $page->context)) {
-            $rubric .= $output->display_rubric_mapping_explained($this->get_min_max_score());
+            if (!$options['lockzeropoints']) {
+                // Warn about using grade calculation method where minimum number of points is flexible.
+                $rubric .= $output->display_rubric_mapping_explained($this->get_min_max_score());
+            }
             $rubric .= $output->display_rubric($criteria, $options, self::DISPLAY_PREVIEW, 'rubric');
         } else {
             $rubric .= $output->display_rubric($criteria, $options, self::DISPLAY_PREVIEW_GRADED, 'rubric');
@@ -668,15 +689,15 @@ class gradingform_rubric_controller extends gradingform_controller {
         $rubric_criteria = new external_multiple_structure(
             new external_single_structure(
                 array(
-                   'id'   => new external_value(PARAM_INT, 'criterion id'),
-                   'sortorder' => new external_value(PARAM_INT, 'sortorder'),
+                   'id'   => new external_value(PARAM_INT, 'criterion id', VALUE_OPTIONAL),
+                   'sortorder' => new external_value(PARAM_INT, 'sortorder', VALUE_OPTIONAL),
                    'description' => new external_value(PARAM_RAW, 'description', VALUE_OPTIONAL),
                    'descriptionformat' => new external_format_value('description', VALUE_OPTIONAL),
                    'levels' => new external_multiple_structure(
                                    new external_single_structure(
                                        array(
-                                        'id' => new external_value(PARAM_INT, 'level id'),
-                                        'score' => new external_value(PARAM_FLOAT, 'score'),
+                                        'id' => new external_value(PARAM_INT, 'level id', VALUE_OPTIONAL),
+                                        'score' => new external_value(PARAM_FLOAT, 'score', VALUE_OPTIONAL),
                                         'definition' => new external_value(PARAM_RAW, 'definition', VALUE_OPTIONAL),
                                         'definitionformat' => new external_format_value('definition', VALUE_OPTIONAL)
                                        )
@@ -754,6 +775,37 @@ class gradingform_rubric_instance extends gradingform_instance {
             $DB->insert_record('gradingform_rubric_fillings', $params);
         }
         return $instanceid;
+    }
+
+    /**
+     * Determines whether the submitted form was empty.
+     *
+     * @param array $elementvalue value of element submitted from the form
+     * @return boolean true if the form is empty
+     */
+    public function is_empty_form($elementvalue) {
+        $criteria = $this->get_controller()->get_definition()->rubric_criteria;
+
+        foreach ($criteria as $id => $criterion) {
+            if (isset($elementvalue['criteria'][$id]['levelid'])
+                    || !empty($elementvalue['criteria'][$id]['remark'])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Removes the attempt from the gradingform_guide_fillings table
+     * @param array $data the attempt data
+     */
+    public function clear_attempt($data) {
+        global $DB;
+
+        foreach ($data['criteria'] as $criterionid => $record) {
+            $DB->delete_records('gradingform_rubric_fillings',
+                array('criterionid' => $criterionid, 'instanceid' => $this->get_id()));
+        }
     }
 
     /**
@@ -858,11 +910,19 @@ class gradingform_rubric_instance extends gradingform_instance {
         foreach ($grade['criteria'] as $id => $record) {
             $curscore += $this->get_controller()->get_definition()->rubric_criteria[$id]['levels'][$record['levelid']]['score'];
         }
-        $gradeoffset = ($curscore-$scores['minscore'])/($scores['maxscore']-$scores['minscore'])*($maxgrade-$mingrade);
-        if ($this->get_controller()->get_allow_grade_decimals()) {
-            return $gradeoffset + $mingrade;
+
+        $allowdecimals = $this->get_controller()->get_allow_grade_decimals();
+        $options = $this->get_controller()->get_options();
+
+        if ($options['lockzeropoints']) {
+            // Grade calculation method when 0-level is locked.
+            $grade = max($mingrade, $curscore / $scores['maxscore'] * $maxgrade);
+            return $allowdecimals ? $grade : round($grade, 0);
+        } else {
+            // Alternative grade calculation method.
+            $gradeoffset = ($curscore - $scores['minscore']) / ($scores['maxscore'] - $scores['minscore']) * ($maxgrade - $mingrade);
+            return ($allowdecimals ? $gradeoffset : round($gradeoffset, 0)) + $mingrade;
         }
-        return round($gradeoffset, 0) + $mingrade;
     }
 
     /**
@@ -896,7 +956,8 @@ class gradingform_rubric_instance extends gradingform_instance {
         }
         $currentinstance = $this->get_current_instance();
         if ($currentinstance && $currentinstance->get_status() == gradingform_instance::INSTANCE_STATUS_NEEDUPDATE) {
-            $html .= html_writer::tag('div', get_string('needregrademessage', 'gradingform_rubric'), array('class' => 'gradingform_rubric-regrade'));
+            $html .= html_writer::div(get_string('needregrademessage', 'gradingform_rubric'), 'gradingform_rubric-regrade',
+                                      array('role' => 'alert'));
         }
         $haschanges = false;
         if ($currentinstance) {

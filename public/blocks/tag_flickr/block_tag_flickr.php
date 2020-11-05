@@ -43,15 +43,10 @@ class block_tag_flickr extends block_base {
         return true;
     }
 
-    function preferred_width() {
-        return 170;
-    }
-
     function get_content() {
         global $CFG, $USER;
 
         //note: do NOT include files at the top of this file
-        require_once($CFG->dirroot.'/tag/lib.php');
         require_once($CFG->libdir . '/filelib.php');
 
         if ($this->content !== NULL) {
@@ -60,11 +55,12 @@ class block_tag_flickr extends block_base {
 
         $tagid = optional_param('id', 0, PARAM_INT);   // tag id - for backware compatibility
         $tag = optional_param('tag', '', PARAM_TAG); // tag
+        $tc = optional_param('tc', 0, PARAM_INT); // Tag collection id.
 
-        if ($tag) {
-            $tagobject = tag_get('name', $tag);
-        } else if ($tagid) {
-            $tagobject = tag_get('id', $tagid);
+        if ($tagid) {
+            $tagobject = core_tag_tag::get($tagid);
+        } else if ($tag) {
+            $tagobject = core_tag_tag::get_by_name($tc, $tag);
         }
 
         if (empty($tagobject)) {
@@ -77,7 +73,9 @@ class block_tag_flickr extends block_base {
         //include related tags in the photo query ?
         $tagscsv = $tagobject->name;
         if (!empty($this->config->includerelatedtags)) {
-            $tagscsv .= ',' . tag_get_related_tags_csv(tag_get_related_tags($tagobject->id), TAG_RETURN_TEXT);
+            foreach ($tagobject->get_related_tags() as $t) {
+                $tagscsv .= ',' . $t->get_display_name(false);
+            }
         }
         $tagscsv = urlencode($tagscsv);
 
@@ -96,7 +94,7 @@ class block_tag_flickr extends block_base {
         //pull photos from a specific photoset
         if(!empty($this->config->photoset)){
 
-            $request = 'http://api.flickr.com/services/rest/?method=flickr.photosets.getPhotos';
+            $request = 'https://api.flickr.com/services/rest/?method=flickr.photosets.getPhotos';
             $request .= '&api_key='.FLICKR_DEV_KEY;
             $request .= '&photoset_id='.$this->config->photoset;
             $request .= '&per_page='.$numberofphotos;
@@ -116,7 +114,7 @@ class block_tag_flickr extends block_base {
         //search for photos tagged with $tagscsv
         else{
 
-            $request = 'http://api.flickr.com/services/rest/?method=flickr.photos.search';
+            $request = 'https://api.flickr.com/services/rest/?method=flickr.photos.search';
             $request .= '&api_key='.FLICKR_DEV_KEY;
             $request .= '&tags='.$tagscsv;
             $request .= '&per_page='.$numberofphotos;
@@ -179,6 +177,22 @@ class block_tag_flickr extends block_base {
             $url = 'http://farm' . $photo['farm'] . '.static.flickr.com/' . $photo['server'] . '/' . $photo['id'] . '_' . $photo['secret'] . $sizes[$size] . '.jpg';
         }
         return $url;
+    }
+
+    /**
+     * Return the plugin config settings for external functions.
+     *
+     * @return stdClass the configs for both the block instance and plugin
+     * @since Moodle 3.8
+     */
+    public function get_config_for_external() {
+        // Return all settings for all users since it is safe (no private keys, etc..).
+        $configs = !empty($this->config) ? $this->config : new stdClass();
+
+        return (object) [
+            'instance' => $configs,
+            'plugin' => new stdClass(),
+        ];
     }
 }
 

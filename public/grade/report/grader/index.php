@@ -40,8 +40,8 @@ $target        = optional_param('target', 0, PARAM_ALPHANUM);
 $toggle        = optional_param('toggle', null, PARAM_INT);
 $toggle_type   = optional_param('toggle_type', 0, PARAM_ALPHANUM);
 
-$graderreportsifirst  = optional_param('sifirst', null, PARAM_ALPHA);
-$graderreportsilast   = optional_param('silast', null, PARAM_ALPHA);
+$graderreportsifirst  = optional_param('sifirst', null, PARAM_NOTAGS);
+$graderreportsilast   = optional_param('silast', null, PARAM_NOTAGS);
 
 // The report object is recreated each time, save search information to SESSION object for future use.
 if (isset($graderreportsifirst)) {
@@ -52,10 +52,11 @@ if (isset($graderreportsilast)) {
 }
 
 $PAGE->set_url(new moodle_url('/grade/report/grader/index.php', array('id'=>$courseid)));
+$PAGE->requires->yui_module('moodle-gradereport_grader-gradereporttable', 'Y.M.gradereport_grader.init', null, null, true);
 
 // basic access checks
 if (!$course = $DB->get_record('course', array('id' => $courseid))) {
-    print_error('nocourseid');
+    print_error('invalidcourseid');
 }
 require_login($course);
 $context = context_course::instance($course->id);
@@ -64,7 +65,14 @@ require_capability('gradereport/grader:view', $context);
 require_capability('moodle/grade:viewall', $context);
 
 // return tracking object
-$gpr = new grade_plugin_return(array('type'=>'report', 'plugin'=>'grader', 'courseid'=>$courseid, 'page'=>$page));
+$gpr = new grade_plugin_return(
+    array(
+        'type' => 'report',
+        'plugin' => 'grader',
+        'course' => $course,
+        'page' => $page
+    )
+);
 
 // last selected report session tracking
 if (!isset($USER->grade_last_report)) {
@@ -114,15 +122,15 @@ if (!is_null($toggle) && !empty($toggle_type)) {
     set_user_preferences(array('grade_report_show'.$toggle_type => $toggle));
 }
 
-//first make sure we have proper final grades - this must be done before constructing of the grade tree
-grade_regrade_final_grades($courseid);
-
 // Perform actions
 if (!empty($target) && !empty($action) && confirm_sesskey()) {
-    grade_report_grader::do_process_action($target, $action);
+    grade_report_grader::do_process_action($target, $action, $courseid);
 }
 
 $reportname = get_string('pluginname', 'gradereport_grader');
+
+// Do this check just before printing the grade header (and only do it once).
+grade_regrade_final_grades_if_required($course);
 
 // Print header
 print_grade_page_head($COURSE->id, 'report', 'grader', $reportname, false, $buttons);
@@ -179,14 +187,17 @@ $reporthtml = $report->get_grade_table($displayaverages);
 
 // print submit button
 if ($USER->gradeediting[$course->id] && ($report->get_pref('showquickfeedback') || $report->get_pref('quickgrading'))) {
-    echo '<form action="index.php" enctype="application/x-www-form-urlencoded" method="post">'; // Enforce compatibility with our max_input_vars hack.
+    echo '<form action="index.php" enctype="application/x-www-form-urlencoded" method="post" id="gradereport_grader">'; // Enforce compatibility with our max_input_vars hack.
     echo '<div>';
     echo '<input type="hidden" value="'.s($courseid).'" name="id" />';
     echo '<input type="hidden" value="'.sesskey().'" name="sesskey" />';
+    echo '<input type="hidden" value="'.time().'" name="timepageload" />';
     echo '<input type="hidden" value="grader" name="report"/>';
     echo '<input type="hidden" value="'.$page.'" name="page"/>';
+    echo $gpr->get_form_fields();
     echo $reporthtml;
-    echo '<div class="submit"><input type="submit" id="gradersubmit" value="'.s(get_string('update')).'" /></div>';
+    echo '<div class="submit"><input type="submit" id="gradersubmit" class="btn btn-primary"
+        value="'.s(get_string('savechanges')).'" /></div>';
     echo '</div></form>';
 } else {
     echo $reporthtml;
@@ -196,4 +207,13 @@ if ($USER->gradeediting[$course->id] && ($report->get_pref('showquickfeedback') 
 if (!empty($studentsperpage) && $studentsperpage >= 20) {
     echo $OUTPUT->paging_bar($numusers, $report->page, $studentsperpage, $report->pbarurl);
 }
+
+$event = \gradereport_grader\event\grade_report_viewed::create(
+    array(
+        'context' => $context,
+        'courseid' => $courseid,
+    )
+);
+$event->trigger();
+
 echo $OUTPUT->footer();

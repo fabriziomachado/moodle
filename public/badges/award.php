@@ -24,13 +24,14 @@
  * @author     Yuliya Bozhko <yuliya.bozhko@totaralms.com>
  */
 
-require_once(dirname(dirname(__FILE__)) . '/config.php');
+require_once(__DIR__ . '/../config.php');
 require_once($CFG->libdir . '/badgeslib.php');
 require_once($CFG->dirroot . '/badges/lib/awardlib.php');
 
 $badgeid = required_param('id', PARAM_INT);
 $role = optional_param('role', 0, PARAM_INT);
 $award = optional_param('award', false, PARAM_BOOL);
+$revoke = optional_param('revoke', false, PARAM_BOOL);
 
 require_login();
 
@@ -81,6 +82,27 @@ $output = $PAGE->get_renderer('core', 'badges');
 // Roles that can award this badge.
 $acceptedroles = array_keys($badge->criteria[BADGE_CRITERIA_TYPE_MANUAL]->params);
 
+if (empty($acceptedroles)) {
+    echo $OUTPUT->header();
+    $return = html_writer::link(new moodle_url('recipients.php', array('id' => $badge->id)), $strrecipients);
+    echo $OUTPUT->notification(get_string('notacceptedrole', 'badges', $return));
+    echo $OUTPUT->footer();
+    die();
+}
+
+// Get groupmode and currentgroup before going further.
+$groupmode = groups_get_course_groupmode($COURSE);  // Groups are being used.
+$currentgroup = groups_get_course_group($COURSE, true); // Get active group.
+
+// Check groupmode (SEPARATEGROUPS), currentgroup and capability (or admin).
+if ($groupmode == SEPARATEGROUPS && empty($currentgroup) &&
+    !has_capability('moodle/site:accessallgroups', $context) && !is_siteadmin() ) {
+    echo $OUTPUT->header();
+    echo $OUTPUT->heading(get_string("notingroup"));
+    echo $OUTPUT->footer();
+    die();
+}
+
 if (count($acceptedroles) > 1) {
     // If there is more than one role that can award a badge, prompt user to make a selection.
     // If it is an admin, include all accepted roles, otherwise only the ones that current user has in this context.
@@ -89,7 +111,9 @@ if (count($acceptedroles) > 1) {
     } else {
         // Get all the roles that user has and use the ones required by this badge.
         $roles = get_user_roles($context, $USER->id);
-        $roleids = array_map(create_function('$o', 'return $o->roleid;'), $roles);
+        $roleids = array_map(function($o) {
+            return $o->roleid;
+        }, $roles);
         $selection = array_intersect($acceptedroles, $roleids);
     }
 
@@ -102,14 +126,16 @@ if (count($acceptedroles) > 1) {
         if (!$role) {
             $pageurl = new moodle_url('/badges/award.php', array('id' => $badgeid));
             echo $OUTPUT->header();
-            echo $OUTPUT->box(get_string('selectaward', 'badges') . $OUTPUT->single_select(new moodle_url($pageurl), 'role', $select));
+            echo $OUTPUT->box($OUTPUT->single_select(new moodle_url($pageurl), 'role', $select, '', array('' => 'choosedots'),
+                null, array('label' => get_string('selectaward', 'badges'))));
             echo $OUTPUT->footer();
             die();
         } else {
             $pageurl = new moodle_url('/badges/award.php', array('id' => $badgeid));
             $issuerrole = new stdClass();
             $issuerrole->roleid = $role;
-            $roleselect = get_string('selectaward', 'badges') . $OUTPUT->single_select(new moodle_url($pageurl), 'role', $select, $role, null);
+            $roleselect = $OUTPUT->single_select(new moodle_url($pageurl), 'role', $select, $role, null, null,
+                array('label' => get_string('selectaward', 'badges')));
         }
     } else {
         echo $OUTPUT->header();
@@ -120,7 +146,7 @@ if (count($acceptedroles) > 1) {
     }
 } else {
     // User has to be an admin or the one with the required role.
-    $users = get_role_users($acceptedroles[0], $context, false, 'u.id', 'u.id ASC');
+    $users = get_role_users($acceptedroles[0], $context, true, 'u.id', 'u.id ASC');
     $usersids = array_keys($users);
     if (!$isadmin && !in_array($USER->id, $usersids)) {
         echo $OUTPUT->header();
@@ -138,8 +164,10 @@ $options = array(
         'badgeid' => $badge->id,
         'context' => $context,
         'issuerid' => $USER->id,
-        'issuerrole' => $issuerrole->roleid
-        );
+        'issuerrole' => $issuerrole->roleid,
+        'currentgroup' => $currentgroup,
+        'url' => $url,
+    );
 $existingselector = new badge_existing_users_selector('existingrecipients', $options);
 $recipientselector = new badge_potential_users_selector('potentialrecipients', $options);
 $recipientselector->set_existing_recipients($existingselector->find_users(''));
@@ -162,10 +190,26 @@ if ($award && data_submitted() && has_capability('moodle/badges:awardbadge', $co
     $recipientselector->invalidate_selected_users();
     $existingselector->invalidate_selected_users();
     $recipientselector->set_existing_recipients($existingselector->find_users(''));
+} else if ($revoke && data_submitted() && has_capability('moodle/badges:revokebadge', $context)) {
+    require_sesskey();
+    $users = $existingselector->get_selected_users();
+
+    foreach ($users as $user) {
+        if (!process_manual_revoke($user->id, $USER->id, $issuerrole->roleid, $badgeid)) {
+            echo $OUTPUT->error_text(get_string('error:cannotrevokebadge', 'badges'));
+        }
+    }
+
+    $recipientselector->invalidate_selected_users();
+    $existingselector->invalidate_selected_users();
+    $recipientselector->set_existing_recipients($existingselector->find_users(''));
 }
 
 echo $OUTPUT->header();
 echo $OUTPUT->heading($strrecipients);
+
+// Print group selector/dropdown menu (find out current groups mode).
+groups_print_course_menu($COURSE, $url);
 
 if (count($acceptedroles) > 1) {
     echo $OUTPUT->box($roleselect);

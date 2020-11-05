@@ -25,12 +25,23 @@
 defined('MOODLE_INTERNAL') || die();
 
 require_once(__DIR__ . '/fixtures/event.php');
+require_once(__DIR__ . '/fixtures/store.php');
 
 class logstore_database_store_testcase extends advanced_testcase {
-    public function test_log_writing() {
+    /**
+     * Tests log writing.
+     *
+     * @param bool $jsonformat True to test with JSON format
+     * @dataProvider test_log_writing_provider
+     * @throws moodle_exception
+     */
+    public function test_log_writing(bool $jsonformat) {
         global $DB, $CFG;
         $this->resetAfterTest();
         $this->preventResetByRollback(); // Logging waits till the transaction gets committed.
+
+        // Apply JSON format system setting.
+        set_config('jsonformat', $jsonformat ? 1 : 0, 'logstore_database');
 
         $dbman = $DB->get_manager();
         $this->assertTrue($dbman->table_exists('logstore_standard_log'));
@@ -51,8 +62,7 @@ class logstore_database_store_testcase extends advanced_testcase {
         $this->assertCount(0, $stores);
 
         // Fake the settings, we will abuse the standard plugin table here...
-        $parts = explode('_', get_class($DB));
-        set_config('dbdriver', $parts[1] . '/' . $parts[0], 'logstore_database');
+        set_config('dbdriver', $CFG->dblibrary . '/' . $CFG->dbtype, 'logstore_database');
         set_config('dbhost', $CFG->dbhost, 'logstore_database');
         set_config('dbuser', $CFG->dbuser, 'logstore_database');
         set_config('dbpass', $CFG->dbpass, 'logstore_database');
@@ -82,6 +92,11 @@ class logstore_database_store_testcase extends advanced_testcase {
             set_config('dbcollation', $CFG->dboptions['dbcollation'], 'logstore_database');
         } else {
             set_config('dbcollation', '', 'logstore_database');
+        }
+        if (!empty($CFG->dboptions['dbhandlesoptions'])) {
+            set_config('dbhandlesoptions', $CFG->dboptions['dbhandlesoptions'], 'logstore_database');
+        } else {
+            set_config('dbhandlesoptions', false, 'logstore_database');
         }
 
         // Enable logging plugin.
@@ -113,7 +128,11 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         $log1 = reset($logs);
         unset($log1->id);
-        $log1->other = unserialize($log1->other);
+        if ($jsonformat) {
+            $log1->other = json_decode($log1->other, true);
+        } else {
+            $log1->other = unserialize($log1->other);
+        }
         $log1 = (array)$log1;
         $data = $event1->get_data();
         $data['origin'] = 'cli';
@@ -129,8 +148,7 @@ class logstore_database_store_testcase extends advanced_testcase {
             array('context' => context_module::instance($module2->cmid), 'other' => array('sample' => 6, 'xx' => 9)));
         $event2->trigger();
 
-        $_SESSION['SESSION'] = new \stdClass();
-        $this->setUser(0);
+        \core\session\manager::init_empty_session();
         $this->assertFalse(\core\session\manager::is_loggedinas());
 
         $logs = $DB->get_records('logstore_standard_log', array(), 'id ASC');
@@ -141,7 +159,11 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         $log3 = array_shift($logs);
         unset($log3->id);
-        $log3->other = unserialize($log3->other);
+        if ($jsonformat) {
+            $log3->other = json_decode($log3->other, true);
+        } else {
+            $log3->other = unserialize($log3->other);
+        }
         $log3 = (array)$log3;
         $data = $event2->get_data();
         $data['origin'] = 'cli';
@@ -151,7 +173,7 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         // Test reading.
         $this->assertSame(3, $store->get_events_select_count('', array()));
-        $events = $store->get_events_select('', array(), 'id', 0, 0);
+        $events = $store->get_events_select('', array(), 'timecreated ASC', 0, 0); // Is actually sorted by "timecreated ASC, id ASC".
         $this->assertCount(3, $events);
         $resev1 = array_shift($events);
         array_shift($events);
@@ -223,5 +245,82 @@ class logstore_database_store_testcase extends advanced_testcase {
 
         set_config('enabled_stores', '', 'tool_log');
         get_log_manager(true);
+    }
+
+    /**
+     * Returns different JSON format settings so the test can be run with JSON format either on or
+     * off.
+     *
+     * @return [bool] Array of true/false
+     */
+    public static function test_log_writing_provider(): array {
+        return [
+            [false],
+            [true]
+        ];
+    }
+
+    /**
+     * Test method is_event_ignored.
+     */
+    public function test_is_event_ignored() {
+        $this->resetAfterTest();
+
+        // Test guest filtering.
+        set_config('logguests', 0, 'logstore_database');
+        $this->setGuestUser();
+        $event = \logstore_database\event\unittest_executed::create(
+                array('context' => context_system::instance(), 'other' => array('sample' => 5, 'xx' => 10)));
+        $logmanager = get_log_manager();
+        $store = new \logstore_database\test\store($logmanager);
+        $this->assertTrue($store->is_event_ignored($event));
+
+        set_config('logguests', 1, 'logstore_database');
+        $store = new \logstore_database\test\store($logmanager); // Reload.
+        $this->assertFalse($store->is_event_ignored($event));
+
+        // Test action/level filtering.
+        set_config('includelevels', '', 'logstore_database');
+        set_config('includeactions', '', 'logstore_database');
+        $store = new \logstore_database\test\store($logmanager); // Reload.
+        $this->assertTrue($store->is_event_ignored($event));
+
+        set_config('includelevels', '0,1', 'logstore_database');
+        $store = new \logstore_database\test\store($logmanager); // Reload.
+        $this->assertTrue($store->is_event_ignored($event));
+
+        set_config('includelevels', '0,1,2', 'logstore_database');
+        $store = new \logstore_database\test\store($logmanager); // Reload.
+        $this->assertFalse($store->is_event_ignored($event));
+
+        set_config('includelevels', '', 'logstore_database');
+        set_config('includeactions', 'c,r,d', 'logstore_database');
+        $store = new \logstore_database\test\store($logmanager); // Reload.
+        $this->assertTrue($store->is_event_ignored($event));
+
+        set_config('includeactions', 'c,r,u,d', 'logstore_database');
+        $store = new \logstore_database\test\store($logmanager); // Reload.
+        $this->assertFalse($store->is_event_ignored($event));
+    }
+
+    /**
+     * Test logmanager::get_supported_reports returns all reports that require this store.
+     */
+    public function test_get_supported_reports() {
+        $logmanager = get_log_manager();
+        $allreports = \core_component::get_plugin_list('report');
+
+        $supportedreports = array(
+            'report_log' => '/report/log',
+            'report_loglive' => '/report/loglive'
+        );
+
+        // Make sure all supported reports are installed.
+        $expectedreports = array_keys(array_intersect_key($allreports, $supportedreports));
+        $reports = $logmanager->get_supported_reports('logstore_database');
+        $reports = array_keys($reports);
+        foreach ($expectedreports as $expectedreport) {
+            $this->assertContains($expectedreport, $reports);
+        }
     }
 }

@@ -4,11 +4,13 @@
 
     require('../../config.php');
 
+    $context = context_system::instance();
     $PAGE->set_url('/auth/shibboleth/index.php');
+    $PAGE->set_context($context);
 
     // Support for WAYFless URLs.
     $target = optional_param('target', '', PARAM_LOCALURL);
-    if (!empty($target)) {
+    if (!empty($target) && empty($SESSION->wantsurl)) {
         $SESSION->wantsurl = $target;
     }
 
@@ -26,29 +28,35 @@
 
     }
 
-    $pluginconfig   = get_config('auth/shibboleth');
+    $pluginconfig   = get_config('auth_shibboleth');
     $shibbolethauth = get_auth_plugin('shibboleth');
 
     // Check whether Shibboleth is configured properly
+    $readmeurl = (new moodle_url('/auth/shibboleth/README.txt'))->out();
     if (empty($pluginconfig->user_attribute)) {
-        print_error('shib_not_set_up_error', 'auth_shibboleth');
+        print_error('shib_not_set_up_error', 'auth_shibboleth', '', $readmeurl);
      }
 
 /// If we can find the Shibboleth attribute, save it in session and return to main login page
     if (!empty($_SERVER[$pluginconfig->user_attribute])) {    // Shibboleth auto-login
         $frm = new stdClass();
         $frm->username = strtolower($_SERVER[$pluginconfig->user_attribute]);
-        $frm->password = substr(base64_encode($_SERVER[$pluginconfig->user_attribute]),0,8);
-        // The random password consists of the first 8 letters of the base 64 encoded user ID
-        // This password is never used unless the user account is converted to manual
+        // The password is never actually used, but needs to be passed to the functions 'user_login' and
+        // 'authenticate_user_login'. Shibboleth returns true for the function 'prevent_local_password', which is
+        // used when setting the password in 'update_internal_user_password'. When 'prevent_local_password'
+        // returns true, the password is set to 'not cached' (AUTH_PASSWORD_NOT_CACHED) in the Moodle DB. However,
+        // rather than setting the password to a hard-coded value, we will generate one each time, in case there are
+        // changes to the Shibboleth plugin and it is actually used.
+        $frm->password = generate_password(8);
 
     /// Check if the user has actually submitted login data to us
+        $reason = null;
 
         if ($shibbolethauth->user_login($frm->username, $frm->password)
-                && $user = authenticate_user_login($frm->username, $frm->password)) {
+                && $user = authenticate_user_login($frm->username, $frm->password, false, $reason, false)) {
             complete_user_login($user);
 
-            if (user_not_fully_set_up($USER)) {
+            if (user_not_fully_set_up($USER, true)) {
                 $urltogo = $CFG->wwwroot.'/user/edit.php?id='.$USER->id.'&amp;course='.SITEID;
                 // We don't delete $SESSION->wantsurl yet, so we get there later
 
@@ -84,7 +92,7 @@
     elseif (!empty($_SERVER['HTTP_SHIB_APPLICATION_ID']) || !empty($_SERVER['Shib-Application-ID'])) {
         print_error('shib_no_attributes_error', 'auth_shibboleth' , '', '\''.$pluginconfig->user_attribute.'\', \''.$pluginconfig->field_map_firstname.'\', \''.$pluginconfig->field_map_lastname.'\' and \''.$pluginconfig->field_map_email.'\'');
     } else {
-        print_error('shib_not_set_up_error', 'auth_shibboleth');
+        print_error('shib_not_set_up_error', 'auth_shibboleth', '', $readmeurl);
     }
 
 

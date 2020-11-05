@@ -19,24 +19,22 @@
  * This file is used to deliver a branch from the site administration
  * in XML format back to a page from an AJAX call
  *
- * @since 2.6
+ * @since Moodle 2.6
  * @package core
  * @copyright 2013 Rajesh Taneja <rajesh@moodle.com>
  * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
 define('AJAX_SCRIPT', true);
-require_once(dirname(__FILE__) . '/../../config.php');
+require_once(__DIR__ . '/../../config.php');
 
 // This should be accessed by only valid logged in user.
-if (!isloggedin() or isguestuser()) {
-    die('Invalid access.');
-}
+require_login(null, false);
 
 // This identifies the type of the branch we want to get. Make sure it's SITE_ADMIN.
 $branchtype = required_param('type', PARAM_INT);
 if ($branchtype !== navigation_node::TYPE_SITE_ADMIN) {
-    die('Wrong node type passed.');
+    throw new coding_exception('Incorrect node type passed');
 }
 
 // Start capturing output in case of broken plugins.

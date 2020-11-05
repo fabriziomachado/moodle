@@ -25,7 +25,7 @@
 namespace logstore_database\log;
 defined('MOODLE_INTERNAL') || die();
 
-class store implements \tool_log\log\writer, \core\log\sql_select_reader {
+class store implements \tool_log\log\writer, \core\log\sql_reader {
     use \tool_log\helper\store,
         \tool_log\helper\reader,
         \tool_log\helper\buffered_writer {
@@ -38,11 +38,11 @@ class store implements \tool_log\log\writer, \core\log\sql_select_reader {
     /** @var bool $logguests true if logging guest access */
     protected $logguests;
 
-    /** @var array $excludelevels An array of education levels to exclude */
-    protected $excludelevels = array();
+    /** @var array $includelevels An array of education levels to include */
+    protected $includelevels = array();
 
-    /** @var array $excludeactions An array of actions types to exclude */
-    protected $excludeactions = array();
+    /** @var array $includeactions An array of actions types to include */
+    protected $includeactions = array();
 
     /**
      * Construct
@@ -53,10 +53,13 @@ class store implements \tool_log\log\writer, \core\log\sql_select_reader {
         $this->helper_setup($manager);
         $this->buffersize = $this->get_config('buffersize', 50);
         $this->logguests = $this->get_config('logguests', 1);
-        $actions = $this->get_config('excludeactions', '');
-        $levels = $this->get_config('excludelevels', '');
-        $this->excludeactions = $actions === '' ? array() : explode(',', $actions);
-        $this->excludelevels = $levels === '' ? array() : explode(',', $levels);
+        $actions = $this->get_config('includeactions', '');
+        $levels = $this->get_config('includelevels', '');
+        $this->includeactions = $actions === '' ? array() : explode(',', $actions);
+        $this->includelevels = $levels === '' ? array() : explode(',', $levels);
+        // JSON writing defaults to false (table format compatibility with older versions).
+        // Note: This variable is defined in the buffered_writer trait.
+        $this->jsonformat = (bool)$this->get_config('jsonformat', false);
     }
 
     /**
@@ -88,6 +91,7 @@ class store implements \tool_log\log\writer, \core\log\sql_select_reader {
         $dboptions['dbport'] = $this->get_config('dbport', '');
         $dboptions['dbschema'] = $this->get_config('dbschema', '');
         $dboptions['dbcollation'] = $this->get_config('dbcollation', '');
+        $dboptions['dbhandlesoptions'] = $this->get_config('dbhandlesoptions', false);
         try {
             $db->connect($this->get_config('dbhost'), $this->get_config('dbuser'), $this->get_config('dbpass'),
                 $this->get_config('dbname'), false, $dboptions);
@@ -108,48 +112,40 @@ class store implements \tool_log\log\writer, \core\log\sql_select_reader {
     }
 
     /**
+     * Should the event be ignored (== not logged)?
+     * @param \core\event\base $event
+     * @return bool
+     */
+    protected function is_event_ignored(\core\event\base $event) {
+        if (!in_array($event->crud, $this->includeactions) &&
+            !in_array($event->edulevel, $this->includelevels)
+        ) {
+            // Ignore event if the store settings do not want to store it.
+            return true;
+        }
+        if ((!CLI_SCRIPT or PHPUNIT_TEST) and !$this->logguests) {
+            // Always log inside CLI scripts because we do not login there.
+            if (!isloggedin() or isguestuser()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Insert events in bulk to the database.
      *
-     * @param \core\event\base[] $events
+     * @param array $evententries raw event data
      */
-    protected function insert_events($events) {
+    protected function insert_event_entries($evententries) {
         if (!$this->init()) {
             return;
         }
         if (!$dbtable = $this->get_config('dbtable')) {
             return;
         }
-        $dataobj = array();
-
-        // Filter events.
-        foreach ($events as $event) {
-            if (in_array($event->crud, $this->excludeactions) ||
-                in_array($event->edulevel, $this->excludelevels)
-            ) {
-                // Ignore event if the store settings do not want to store it.
-                continue;
-            }
-            if ((!CLI_SCRIPT or PHPUNIT_TEST) and !$this->logguests) {
-                // Always log inside CLI scripts because we do not login there.
-                if (!isloggedin() or isguestuser()) {
-                    continue;
-                }
-            }
-
-            $data = $event->get_data();
-            $data['other'] = serialize($data['other']);
-            if (CLI_SCRIPT) {
-                $data['origin'] = 'cli';
-                $data['ip'] = null;
-            } else {
-                $data['origin'] = 'web';
-                $data['ip'] = getremoteaddr();
-            }
-            $data['realuserid'] = \core\session\manager::is_loggedinas() ? $_SESSION['USER']->realuser : null;
-            $dataobj[] = $data;
-        }
         try {
-            $this->extdb->insert_records($dbtable, $dataobj);
+            $this->extdb->insert_records($dbtable, $evententries);
         } catch (\moodle_exception $e) {
             debugging('Cannot write to external database: ' . $e->getMessage(), DEBUG_DEVELOPER);
         }
@@ -175,26 +171,75 @@ class store implements \tool_log\log\writer, \core\log\sql_select_reader {
             return array();
         }
 
+        $sort = self::tweak_sort_by_id($sort);
+
         $events = array();
         $records = $this->extdb->get_records_select($dbtable, $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
 
         foreach ($records as $data) {
-            $extra = array('origin' => $data->origin, 'realuserid' => $data->realuserid, 'ip' => $data->ip);
-            $data = (array)$data;
-            $id = $data['id'];
-            $data['other'] = unserialize($data['other']);
-            if ($data['other'] === false) {
-                $data['other'] = array();
+            if ($event = $this->get_log_event($data)) {
+                $events[$data->id] = $event;
             }
-            unset($data['origin']);
-            unset($data['ip']);
-            unset($data['realuserid']);
-            unset($data['id']);
-
-            $events[$id] = \core\event\base::restore($data, $extra);
         }
 
         return $events;
+    }
+
+    /**
+     * Fetch records using given criteria returning a Traversable object.
+     *
+     * Note that the traversable object contains a moodle_recordset, so
+     * remember that is important that you call close() once you finish
+     * using it.
+     *
+     * @param string $selectwhere
+     * @param array $params
+     * @param string $sort
+     * @param int $limitfrom
+     * @param int $limitnum
+     * @return \core\dml\recordset_walk|\core\event\base[]
+     */
+    public function get_events_select_iterator($selectwhere, array $params, $sort, $limitfrom, $limitnum) {
+        if (!$this->init()) {
+            return array();
+        }
+
+        if (!$dbtable = $this->get_config('dbtable')) {
+            return array();
+        }
+
+        $sort = self::tweak_sort_by_id($sort);
+
+        $recordset = $this->extdb->get_recordset_select($dbtable, $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
+
+        return new \core\dml\recordset_walk($recordset, array($this, 'get_log_event'));
+    }
+
+    /**
+     * Returns an event from the log data.
+     *
+     * @param stdClass $data Log data
+     * @return \core\event\base
+     */
+    public function get_log_event($data) {
+
+        $extra = array('origin' => $data->origin, 'ip' => $data->ip, 'realuserid' => $data->realuserid);
+        $data = (array)$data;
+        $id = $data['id'];
+        $data['other'] = self::decode_other($data['other']);
+        if ($data['other'] === false) {
+            $data['other'] = array();
+        }
+        unset($data['origin']);
+        unset($data['ip']);
+        unset($data['realuserid']);
+        unset($data['id']);
+
+        if (!$event = \core\event\base::restore($data, $extra)) {
+            return null;
+        }
+
+        return $event;
     }
 
     /**
@@ -217,7 +262,28 @@ class store implements \tool_log\log\writer, \core\log\sql_select_reader {
         return $this->extdb->count_records_select($dbtable, $selectwhere, $params);
     }
 
-    public function cron() {
+    /**
+     * Get a config value for the store.
+     *
+     * @param string $name Config name
+     * @param mixed $default default value
+     * @return mixed config value if set, else the default value.
+     */
+    public function get_config_value($name, $default = null) {
+        return $this->get_config($name, $default);
+    }
+
+    /**
+     * Get the external database object.
+     *
+     * @return \moodle_database $extdb
+     */
+    public function get_extdb() {
+        if (!$this->init()) {
+            return false;
+        }
+
+        return $this->extdb;
     }
 
     /**

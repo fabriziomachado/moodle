@@ -30,6 +30,7 @@ defined('MOODLE_INTERNAL') || die();
  * All other event classes must extend this class.
  *
  * @package    core
+ * @since      Moodle 2.6
  * @copyright  2013 Petr Skoda {@link http://skodak.org}
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  *
@@ -45,8 +46,10 @@ defined('MOODLE_INTERNAL') || die();
  * @property-read int $contextlevel
  * @property-read int $contextinstanceid
  * @property-read int $userid who did this?
- * @property-read int $courseid
+ * @property-read int $courseid the courseid of the event context, 0 for contexts above course
  * @property-read int $relateduserid
+ * @property-read int $anonymous 1 means event should not be visible in reports, 0 means normal event,
+ *                    create() argument may be also true/false.
  * @property-read mixed $other array or scalar, can not contain objects
  * @property-read int $timecreated
  */
@@ -71,6 +74,26 @@ abstract class base implements \IteratorAggregate {
      * Any event that is performed by a user, and is related (or could be related) to his learning experience.
      */
     const LEVEL_PARTICIPATING = 2;
+
+    /**
+     * The value used when an id can not be mapped during a restore.
+     */
+    const NOT_MAPPED = -31337;
+
+    /**
+     * The value used when an id can not be found during a restore.
+     */
+    const NOT_FOUND = -31338;
+
+    /**
+     * User id to use when the user is not logged in.
+     */
+    const USER_NOTLOGGEDIN = 0;
+
+    /**
+     * User id to use when actor is not an actual user but system, cli or cron.
+     */
+    const USER_OTHER = -1;
 
     /** @var array event data */
     protected $data;
@@ -102,7 +125,7 @@ abstract class base implements \IteratorAggregate {
     /** @var array list of event properties */
     private static $fields = array(
         'eventname', 'component', 'action', 'target', 'objecttable', 'objectid', 'crud', 'edulevel', 'contextid',
-        'contextlevel', 'contextinstanceid', 'userid', 'courseid', 'relateduserid', 'other',
+        'contextlevel', 'contextinstanceid', 'userid', 'courseid', 'relateduserid', 'anonymous', 'other',
         'timecreated');
 
     /** @var array simple record cache */
@@ -158,6 +181,9 @@ abstract class base implements \IteratorAggregate {
         $event->restored = false;
         $event->dispatched = false;
 
+        // By default all events are visible in logs.
+        $event->data['anonymous'] = 0;
+
         // Set static event data specific for child class.
         $event->init();
 
@@ -178,6 +204,10 @@ abstract class base implements \IteratorAggregate {
         $event->data['userid'] = isset($data['userid']) ? $data['userid'] : $USER->id;
         $event->data['other'] = isset($data['other']) ? $data['other'] : null;
         $event->data['relateduserid'] = isset($data['relateduserid']) ? $data['relateduserid'] : null;
+        if (isset($data['anonymous'])) {
+            $event->data['anonymous'] = $data['anonymous'];
+        }
+        $event->data['anonymous'] = (int)(bool)$event->data['anonymous'];
 
         if (isset($event->context)) {
             if (isset($data['context'])) {
@@ -229,6 +259,13 @@ abstract class base implements \IteratorAggregate {
                     debugging("Data key '$key' does not exist in \\core\\event\\base");
                 }
             }
+            $expectedcourseid = 0;
+            if ($coursecontext = $event->context->get_course_context(false)) {
+                $expectedcourseid = $coursecontext->instanceid;
+            }
+            if ($expectedcourseid != $event->data['courseid']) {
+                debugging("Inconsistent courseid - context combination detected.", DEBUG_DEVELOPER);
+            }
         }
 
         // Let developers validate their custom data (such as $this->data['other'], contextlevel, etc.).
@@ -279,6 +316,26 @@ abstract class base implements \IteratorAggregate {
     }
 
     /**
+     * Returns the event name complete with metadata information.
+     *
+     * This includes information about whether the event has been deprecated so should not be used in all situations -
+     * for example within reports themselves.
+     *
+     * If overriding this function, please ensure that you call the parent version too.
+     *
+     * @return string
+     */
+    public static function get_name_with_info() {
+        $return = static::get_name();
+
+        if (static::is_deprecated()) {
+            $return = get_string('deprecatedeventname', 'core', $return);
+        }
+
+        return $return;
+    }
+
+    /**
      * Returns non-localised event description with id's for admin use only.
      *
      * @return string
@@ -288,12 +345,18 @@ abstract class base implements \IteratorAggregate {
     }
 
     /**
-     * Define whether a user can view the event or not.
+     * This method was originally intended for granular
+     * access control on the event level, unfortunately
+     * the proper implementation would be too expensive
+     * in many cases.
+     *
+     * @deprecated since 2.7
      *
      * @param int|\stdClass $user_or_id ID of the user.
      * @return bool True if the user can view the event, false otherwise.
      */
     public function can_view($user_or_id = null) {
+        debugging('can_view() method is deprecated, use anonymous flag instead if necessary.', DEBUG_DEVELOPER);
         return is_siteadmin($user_or_id);
     }
 
@@ -316,13 +379,14 @@ abstract class base implements \IteratorAggregate {
         }
 
         if (!class_exists($classname)) {
-            return false;
+            return self::restore_unknown($data, $logextra);
         }
         $event = new $classname();
         if (!($event instanceof \core\event\base)) {
             return false;
         }
 
+        $event->init(); // Init method of events could be setting custom properties.
         $event->restored = true;
         $event->triggered = true;
         $event->dispatched = true;
@@ -343,6 +407,27 @@ abstract class base implements \IteratorAggregate {
             }
         }
         $event->data = $data;
+
+        return $event;
+    }
+
+    /**
+     * Restore unknown event.
+     *
+     * @param array $data
+     * @param array $logextra
+     * @return unknown_logged
+     */
+    protected static final function restore_unknown(array $data, array $logextra) {
+        $classname = '\core\event\unknown_logged';
+
+        /** @var unknown_logged $event */
+        $event = new $classname();
+        $event->restored = true;
+        $event->triggered = true;
+        $event->dispatched = true;
+        $event->data = $data;
+        $event->logextra = $logextra;
 
         return $event;
     }
@@ -431,6 +516,142 @@ abstract class base implements \IteratorAggregate {
         $event->data['other'] = (array)$legacy;
 
         return $event;
+    }
+
+    /**
+     * This is used when restoring course logs where it is required that we
+     * map the objectid to it's new value in the new course.
+     *
+     * Does nothing in the base class except display a debugging message warning
+     * the user that the event does not contain the required functionality to
+     * map this information. For events that do not store an objectid this won't
+     * be called, so no debugging message will be displayed.
+     *
+     * Example of usage:
+     *
+     * return array('db' => 'assign_submissions', 'restore' => 'submission');
+     *
+     * If the objectid can not be mapped during restore set the value to \core\event\base::NOT_MAPPED, example -
+     *
+     * return array('db' => 'some_table', 'restore' => \core\event\base::NOT_MAPPED);
+     *
+     * Note - it isn't necessary to specify the 'db' and 'restore' values in this case, so you can also use -
+     *
+     * return \core\event\base::NOT_MAPPED;
+     *
+     * The 'db' key refers to the database table and the 'restore' key refers to
+     * the name of the restore element the objectid is associated with. In many
+     * cases these will be the same.
+     *
+     * @return string the name of the restore mapping the objectid links to
+     */
+    public static function get_objectid_mapping() {
+        debugging('In order to restore course logs accurately the event "' . get_called_class() . '" must define the
+            function get_objectid_mapping().', DEBUG_DEVELOPER);
+
+        return false;
+    }
+
+    /**
+     * This is used when restoring course logs where it is required that we
+     * map the information in 'other' to it's new value in the new course.
+     *
+     * Does nothing in the base class except display a debugging message warning
+     * the user that the event does not contain the required functionality to
+     * map this information. For events that do not store any other information this
+     * won't be called, so no debugging message will be displayed.
+     *
+     * Example of usage:
+     *
+     * $othermapped = array();
+     * $othermapped['discussionid'] = array('db' => 'forum_discussions', 'restore' => 'forum_discussion');
+     * $othermapped['forumid'] = array('db' => 'forum', 'restore' => 'forum');
+     * return $othermapped;
+     *
+     * If an id can not be mapped during restore we set it to \core\event\base::NOT_MAPPED, example -
+     *
+     * $othermapped = array();
+     * $othermapped['someid'] = array('db' => 'some_table', 'restore' => \core\event\base::NOT_MAPPED);
+     * return $othermapped;
+     *
+     * Note - it isn't necessary to specify the 'db' and 'restore' values in this case, so you can also use -
+     *
+     * $othermapped = array();
+     * $othermapped['someid'] = \core\event\base::NOT_MAPPED;
+     * return $othermapped;
+     *
+     * The 'db' key refers to the database table and the 'restore' key refers to
+     * the name of the restore element the other value is associated with. In many
+     * cases these will be the same.
+     *
+     * @return array an array of other values and their corresponding mapping
+     */
+    public static function get_other_mapping() {
+        debugging('In order to restore course logs accurately the event "' . get_called_class() . '" must define the
+            function get_other_mapping().', DEBUG_DEVELOPER);
+    }
+
+    /**
+     * Get static information about an event.
+     * This is used in reports and is not for general use.
+     *
+     * @return array Static information about the event.
+     */
+    public static final function get_static_info() {
+        /** Var \core\event\base $event. */
+        $event = new static();
+        // Set static event data specific for child class.
+        $event->init();
+        return array(
+            'eventname' => $event->data['eventname'],
+            'component' => $event->data['component'],
+            'target' => $event->data['target'],
+            'action' => $event->data['action'],
+            'crud' => $event->data['crud'],
+            'edulevel' => $event->data['edulevel'],
+            'objecttable' => $event->data['objecttable'],
+        );
+    }
+
+    /**
+     * Get an explanation of what the class does.
+     * By default returns the phpdocs from the child event class. Ideally this should
+     * be overridden to return a translatable get_string style markdown.
+     * e.g. return new lang_string('eventyourspecialevent', 'plugin_type');
+     *
+     * @return string An explanation of the event formatted in markdown style.
+     */
+    public static function get_explanation() {
+        $ref = new \ReflectionClass(get_called_class());
+        $docblock = $ref->getDocComment();
+
+        // Check that there is something to work on.
+        if (empty($docblock)) {
+            return null;
+        }
+
+        $docblocklines = explode("\n", $docblock);
+        // Remove the bulk of the comment characters.
+        $pattern = "/(^\s*\/\*\*|^\s+\*\s|^\s+\*)/";
+        $cleanline = array();
+        foreach ($docblocklines as $line) {
+            $templine = preg_replace($pattern, '', $line);
+            // If there is nothing on the line then don't add it to the array.
+            if (!empty($templine)) {
+                $cleanline[] = rtrim($templine);
+            }
+            // If we get to a line starting with an @ symbol then we don't want the rest.
+            if (preg_match("/^@|\//", $templine)) {
+                // Get rid of the last entry (it contains an @ symbol).
+                array_pop($cleanline);
+                // Break out of this foreach loop.
+                break;
+            }
+        }
+        // Add a line break to the sanitised lines.
+        $explanation = implode("\n", $cleanline);
+
+        return $explanation;
     }
 
     /**
@@ -592,7 +813,14 @@ abstract class base implements \IteratorAggregate {
             if ($data = $this->get_legacy_logdata()) {
                 $manager = get_log_manager();
                 if (method_exists($manager, 'legacy_add_to_log')) {
-                    call_user_func_array(array($manager, 'legacy_add_to_log'), $data);
+                    if (is_array($data[0])) {
+                        // Some events require several entries in 'log' table.
+                        foreach ($data as $d) {
+                            call_user_func_array(array($manager, 'legacy_add_to_log'), $d);
+                        }
+                    } else {
+                        call_user_func_array(array($manager, 'legacy_add_to_log'), $data);
+                    }
                 }
             }
         }
@@ -606,10 +834,6 @@ abstract class base implements \IteratorAggregate {
         \core\event\manager::dispatch($this);
 
         $this->dispatched = true;
-
-        if ($legacyeventname = static::get_legacy_eventname()) {
-            events_trigger_legacy($legacyeventname, $this->get_legacy_eventdata());
-        }
     }
 
     /**
@@ -657,9 +881,17 @@ abstract class base implements \IteratorAggregate {
             throw new \coding_exception('It is not possible to add snapshots after triggering of events');
         }
 
+        // Special case for course module, allow instance of cm_info to be passed instead of stdClass.
+        if ($tablename === 'course_modules' && $record instanceof \cm_info) {
+            $record = $record->get_course_module_record();
+        }
+
         // NOTE: this might use some kind of MUC cache,
         //       hopefully we will not run out of memory here...
         if ($CFG->debugdeveloper) {
+            if (!($record instanceof \stdClass)) {
+                debugging('Argument $record must be an instance of stdClass.', DEBUG_DEVELOPER);
+            }
             if (!$DB->get_manager()->table_exists($tablename)) {
                 debugging("Invalid table name '$tablename' specified, database table does not exist.", DEBUG_DEVELOPER);
             } else {
@@ -754,5 +986,18 @@ abstract class base implements \IteratorAggregate {
      */
     public function getIterator() {
         return new \ArrayIterator($this->data);
+    }
+
+    /**
+     * Whether this event has been marked as deprecated.
+     *
+     * Events cannot be deprecated in the normal fashion as they must remain to support historical data.
+     * Once they are deprecated, there is no way to trigger the event, so it does not make sense to list it in some
+     * parts of the UI (e.g. Event Monitor).
+     *
+     * @return boolean
+     */
+    public static function is_deprecated() {
+        return false;
     }
 }

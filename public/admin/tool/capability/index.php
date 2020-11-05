@@ -22,7 +22,7 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(__FILE__) . '/../../../config.php');
+require_once(__DIR__ . '/../../../config.php');
 require_once($CFG->dirroot.'/'.$CFG->admin.'/tool/capability/locallib.php');
 require_once($CFG->libdir.'/adminlib.php');
 
@@ -66,6 +66,7 @@ $capabilities = array();
 $rolestoshow = array();
 $roleids = array('0');
 $cleanedroleids = array();
+$onlydiff = false;
 if ($data = $form->get_data()) {
 
     $roleids = array();
@@ -90,9 +91,13 @@ if ($data = $form->get_data()) {
             }
         }
     }
+
+    if (isset($data->onlydiff)) {
+        $onlydiff = $data->onlydiff;
+    }
 }
 
-add_to_log(SITEID, "admin", "tool capability", "tool/capability/index.php", count($capabilities));
+\tool_capability\event\report_viewed::create()->trigger();
 
 $renderer = $PAGE->get_renderer('tool_capability');
 
@@ -103,7 +108,7 @@ $form->display();
 // If we have a capability, generate the report.
 if (count($capabilities) && count($rolestoshow)) {
     /* @var tool_capability_renderer $renderer */
-    echo $renderer->capability_comparison_table($capabilities, $context->id, $rolestoshow);
+    echo $renderer->capability_comparison_table($capabilities, $context->id, $rolestoshow, $onlydiff);
 }
 
 // Footer.
@@ -138,7 +143,7 @@ function print_report_tree($contextid, $contexts, $allroles) {
     // If there are any role overrides here, print them.
     if (!empty($contexts[$contextid]->rolecapabilities)) {
         $rowcounter = 0;
-        echo '<table class="generaltable rolecaps"><tbody>';
+        echo '<table class="generaltable table-striped"><tbody>';
         foreach ($allroles as $role) {
             if (isset($contexts[$contextid]->rolecapabilities[$role->id])) {
                 $permission = $contexts[$contextid]->rolecapabilities[$role->id];

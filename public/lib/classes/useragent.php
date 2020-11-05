@@ -71,7 +71,7 @@ class core_useragent {
         self::DEVICETYPE_DEFAULT,
         self::DEVICETYPE_LEGACY,
         self::DEVICETYPE_MOBILE,
-        self::DEVICETYPE_TABLET
+        self::DEVICETYPE_TABLET,
     );
 
     /**
@@ -120,7 +120,12 @@ class core_useragent {
     protected function __construct($forceuseragent = null) {
         global $CFG;
         if (!empty($CFG->devicedetectregex)) {
-            $this->devicetypecustoms = json_decode($CFG->devicedetectregex);
+            $this->devicetypecustoms = json_decode($CFG->devicedetectregex, true);
+        }
+        if ($this->devicetypecustoms === null) {
+            // This shouldn't happen unless you're hardcoding the config value.
+            debugging('Config devicedetectregex is not valid JSON object');
+            $this->devicetypecustoms = array();
         }
         if ($forceuseragent !== null) {
             $this->useragent = $forceuseragent;
@@ -130,6 +135,18 @@ class core_useragent {
             $this->useragent = false;
             $this->devicetype = self::DEVICETYPE_DEFAULT;
         }
+    }
+
+    /**
+     * Get the MoodleBot UserAgent for this site.
+     *
+     * @return string UserAgent
+     */
+    public static function get_moodlebot_useragent() {
+        global $CFG;
+
+        $version = moodle_major_version(); // Only major version for security.
+        return "MoodleBot/$version (+{$CFG->wwwroot})";
     }
 
     /**
@@ -171,12 +188,12 @@ class core_useragent {
             }
         }
         if ($this->is_useragent_mobile()) {
-            $this->devicetype = 'mobile';
+            $this->devicetype = self::DEVICETYPE_MOBILE;
         } else if ($this->is_useragent_tablet()) {
-            $this->devicetype = 'tablet';
-        } else if (substr($this->useragent, 0, 34) === 'Mozilla/4.0 (compatible; MSIE 6.0;') {
-            // Safe way to check for IE6 and not get false positives for some IE 7/8 users.
-            $this->devicetype = 'legacy';
+            $this->devicetype = self::DEVICETYPE_TABLET;
+        } else if (self::check_ie_version('0') && !self::check_ie_version('7.0')) {
+            // IE 6 and before are considered legacy.
+            $this->devicetype = self::DEVICETYPE_LEGACY;
         } else {
             $this->devicetype = self::DEVICETYPE_DEFAULT;
         }
@@ -196,11 +213,23 @@ class core_useragent {
 
     /**
      * Returns true if the user appears to be on a tablet.
+     *
      * @return int
      */
     protected function is_useragent_tablet() {
         $tabletregex = '/Tablet browser|android|iPad|iProd|GT-P1000|GT-I9000|SHW-M180S|SGH-T849|SCH-I800|Build\/ERE27|sholest/i';
         return (preg_match($tabletregex, $this->useragent));
+    }
+
+    /**
+     * Whether the user agent relates to a web crawler.
+     * This includes all types of web crawler.
+     * @return bool
+     */
+    protected function is_useragent_web_crawler() {
+        $regex = '/MoodleBot|Googlebot|google\.com|Yahoo! Slurp|\[ZSEBOT\]|msnbot|bingbot|BingPreview|Yandex|AltaVista'
+                .'|Baiduspider|Teoma/i';
+        return (preg_match($regex, $this->useragent));
     }
 
     /**
@@ -299,6 +328,10 @@ class core_useragent {
             case 'MSIE':
                 // Internet Explorer.
                 return self::check_ie_version($version);
+
+            case 'Edge':
+                // Microsoft Edge.
+                return self::check_edge_version($version);
 
             case 'Firefox':
                 // Mozilla Firefox browsers.
@@ -466,6 +499,52 @@ class core_useragent {
     }
 
     /**
+     * Checks the user agent is Edge (of any version).
+     *
+     * @return bool true if Edge
+     */
+    public static function is_edge() {
+        return self::check_edge_version();
+    }
+
+    /**
+     * Check the User Agent for the version of Edge.
+     *
+     * @param string|int $version A version to check for, returns true if its equal to or greater than that specified.
+     * @return bool
+     */
+    public static function check_edge_version($version = null) {
+        $useragent = self::get_user_agent_string();
+
+        if ($useragent === false) {
+            // No User Agent found.
+            return false;
+        }
+
+        if (strpos($useragent, 'Edge/') === false) {
+            // Edge was not found in the UA - this is not Edge.
+            return false;
+        }
+
+        if (empty($version)) {
+            // No version to check.
+            return true;
+        }
+
+        // Find the version.
+        // Edge versions are always in the format:
+        //      Edge/<version>.<OS build number>
+        preg_match('%Edge/([\d]+)\.(.*)$%', $useragent, $matches);
+
+        // Just to be safe, round the version being tested.
+        // Edge only uses integer versions - the second component is the OS build number.
+        $version = round($version);
+
+        // Check whether the version specified is >= the version found.
+        return version_compare($matches[1], $version, '>=');
+    }
+
+    /**
      * Checks the user agent is IE (of any version).
      *
      * @return bool true if internet exporeer
@@ -500,6 +579,7 @@ class core_useragent {
         } else {
             return false;
         }
+
         $compatview = false;
         // IE8 and later versions may pretend to be IE7 for intranet sites, use Trident version instead,
         // the Trident should always describe the capabilities of IE in any emulation mode.
@@ -680,7 +760,9 @@ class core_useragent {
             // No Apple mobile devices here - editor does not work, course ajax is not touch compatible, etc.
             return false;
         }
-        if (strpos($useragent, 'Chrome')) { // Reject chrome browsers - it needs to be tested explicitly.
+        if (strpos($useragent, 'Chrome')) {
+            // Reject chrome browsers - it needs to be tested explicitly.
+            // This will also reject Edge, which pretends to be both Chrome, and Safari.
             return false;
         }
 
@@ -751,7 +833,7 @@ class core_useragent {
         if ($useragent === false) {
             return false;
         }
-        if (strpos($useragent, 'Linux; U; Android') === false) {
+        if (strpos($useragent, 'Android') === false) {
             return false;
         }
         if (empty($version)) {
@@ -804,6 +886,25 @@ class core_useragent {
     }
 
     /**
+     * Checks if the user agent is MS Word.
+     * Not perfect, as older versions of Word use standard IE6/7 user agents without any identifying traits.
+     *
+     * @return bool true if user agent could be identified as MS Word.
+     */
+    public static function is_msword() {
+        $useragent = self::get_user_agent_string();
+        if (!preg_match('/(\bWord\b|ms-office|MSOffice|Microsoft Office)/i', $useragent)) {
+            return false;
+        } else if (strpos($useragent, 'Outlook') !== false) {
+            return false;
+        } else if (strpos($useragent, 'Meridio') !== false) {
+            return false;
+        }
+        // It's Office, not Outlook and not Meridio - so it's probably Word, but we can't really be sure in most cases.
+        return true;
+    }
+
+    /**
      * Check if the user agent matches a given brand.
      *
      * Known brand: 'Windows','Linux','Macintosh','SGI','SunOS','HP-UX'
@@ -822,7 +923,9 @@ class core_useragent {
      */
     public static function get_browser_version_classes() {
         $classes = array();
-        if (self::is_ie()) {
+        if (self::is_edge()) {
+            $classes[] = 'edge';
+        } else if (self::is_ie()) {
             $classes[] = 'ie';
             for ($i = 12; $i >= 6; $i--) {
                 if (self::check_ie_version($i)) {
@@ -835,12 +938,19 @@ class core_useragent {
             if (preg_match('/rv\:([1-2])\.([0-9])/', self::get_user_agent_string(), $matches)) {
                 $classes[] = "gecko{$matches[1]}{$matches[2]}";
             }
+        } else if (self::is_chrome()) {
+            $classes[] = 'chrome';
+            if (self::is_webkit_android()) {
+                $classes[] = 'android';
+            }
         } else if (self::is_webkit()) {
-            $classes[] = 'safari';
+            if (self::is_safari()) {
+                $classes[] = 'safari';
+            }
             if (self::is_safari_ios()) {
                 $classes[] = 'ios';
             } else if (self::is_webkit_android()) {
-                $classes[] = 'android';
+                $classes[] = 'android'; // Old pre-Chrome android browsers.
             }
         } else if (self::is_opera()) {
             $classes[] = 'opera';
@@ -860,7 +970,7 @@ class core_useragent {
             if ($instance->useragent === false) {
                 // Can't be sure, just say no.
                 $instance->supportssvg = false;
-            } else if (self::is_ie() and !self::check_ie_version('9')) {
+            } else if (self::check_ie_version('0') and !self::check_ie_version('9')) {
                 // IE < 9 doesn't support SVG. Say no.
                 $instance->supportssvg = false;
             } else if (self::is_ie() and !self::check_ie_version('10') and self::check_ie_compatibility_view()) {
@@ -887,7 +997,7 @@ class core_useragent {
      */
     public static function supports_json_contenttype() {
         // Modern browsers other than IE correctly supports 'application/json' media type.
-        if (!self::is_ie()) {
+        if (!self::check_ie_version('0')) {
             return true;
         }
 
@@ -901,5 +1011,210 @@ class core_useragent {
 
         // This browser does not support json.
         return false;
+    }
+
+    /**
+     * Returns true if the client appears to be some kind of web crawler.
+     * This may include other types of crawler.
+     *
+     * @return bool
+     */
+    public static function is_web_crawler() {
+        $instance = self::instance();
+        return (bool) $instance->is_useragent_web_crawler();
+    }
+
+    /**
+     * Returns true if the client appears to be a device using iOS (iPhone, iPad, iPod).
+     *
+     * @param scalar $version The version if we need to find out if it is equal to or greater than that specified.
+     * @return bool true if the client is using iOS
+     * @since Moodle 3.2
+     */
+    public static function is_ios($version = null) {
+        $useragent = self::get_user_agent_string();
+        if ($useragent === false) {
+            return false;
+        }
+        if (strpos($useragent, 'AppleWebKit') === false) {
+            return false;
+        }
+        if (strpos($useragent, 'Windows')) {
+            // Reject Windows Safari.
+            return false;
+        }
+        if (strpos($useragent, 'Macintosh')) {
+            // Reject MacOS Safari.
+            return false;
+        }
+        // Look for AppleWebKit, excluding strings with OmniWeb, Shiira and SymbianOS and any other mobile devices.
+        if (strpos($useragent, 'OmniWeb')) {
+            // Reject OmniWeb.
+            return false;
+        }
+        if (strpos($useragent, 'Shiira')) {
+            // Reject Shiira.
+            return false;
+        }
+        if (strpos($useragent, 'SymbianOS')) {
+            // Reject SymbianOS.
+            return false;
+        }
+        if (strpos($useragent, 'Android')) {
+            // Reject Androids too.
+            return false;
+        }
+        if (strpos($useragent, 'Chrome')) {
+            // Reject chrome browsers - it needs to be tested explicitly.
+            // This will also reject Edge, which pretends to be both Chrome, and Safari.
+            return false;
+        }
+
+        if (empty($version)) {
+            return true; // No version specified.
+        }
+        if (preg_match("/AppleWebKit\/([0-9.]+)/i", $useragent, $match)) {
+            if (version_compare($match[1], $version) >= 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Returns true if the client appears to be the Moodle app (or an app based on the Moodle app code).
+     *
+     * @return bool true if the client is the Moodle app
+     * @since Moodle 3.7
+     */
+    public static function is_moodle_app() {
+        $useragent = self::get_user_agent_string();
+
+        // Make it case insensitive, things can change in the app or desktop app depending on the platform frameworks.
+        if (stripos($useragent, 'MoodleMobile') !== false) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Checks if current browser supports files with give extension as <video> or <audio> source
+     *
+     * Note, the check here is not 100% accurate!
+     *
+     * First, we do not know which codec is used in .mp4 or .webm files. Not all browsers support
+     * all codecs.
+     *
+     * Also we assume that users of Firefox/Chrome/Safari do not use the ancient versions of browsers.
+     *
+     * We check the exact version for IE/Edge though. We know that there are still users of very old
+     * versions that are afraid to upgrade or have slow IT department.
+     *
+     * Resources:
+     * https://developer.mozilla.org/en-US/docs/Web/HTML/Supported_media_formats
+     * https://en.wikipedia.org/wiki/HTML5_video
+     * https://en.wikipedia.org/wiki/HTML5_Audio
+     *
+     * @param string $extension extension without leading .
+     * @return bool
+     */
+    public static function supports_html5($extension) {
+        $extension = strtolower($extension);
+
+        $supportedvideo = array('m4v', 'webm', 'ogv', 'mp4', 'mov', 'fmp4');
+        $supportedaudio = array('ogg', 'oga', 'aac', 'm4a', 'mp3', 'wav', 'flac');
+
+        // Basic extension support.
+        if (!in_array($extension, $supportedvideo) && !in_array($extension, $supportedaudio)) {
+            return false;
+        }
+
+        // MS IE support - version 9.0 or later.
+        if (self::is_ie() && !self::check_ie_version('9.0')) {
+            return false;
+        }
+
+        // MS Edge support - version 12.0 for desktop and 13.0 for mobile.
+        if (self::is_edge()) {
+            if (!self::check_edge_version('12.0')) {
+                return false;
+            }
+            if (self::instance()->is_useragent_mobile() && !self::check_edge_version('13.0')) {
+                return false;
+            }
+        }
+
+        // Different exceptions.
+
+        // Webm is not supported in IE, Edge and in Safari.
+        if ($extension === 'webm' &&
+                (self::is_ie() || self::is_edge() || self::is_safari() || self::is_safari_ios())) {
+            return false;
+        }
+        // Ogg is not supported in IE, Edge and Safari.
+        $isogg = in_array($extension, ['ogg', 'oga', 'ogv']);
+        if ($isogg && (self::is_ie() || self::is_edge() || self::is_safari() || self::is_safari_ios())) {
+            return false;
+        }
+        // FLAC is not supported in IE and Edge (below 16.0).
+        if ($extension === 'flac' &&
+                (self::is_ie() || (self::is_edge() && !self::check_edge_version('16.0')))) {
+            return false;
+        }
+        // Wave is not supported in IE.
+        if ($extension === 'wav' && self::is_ie()) {
+            return false;
+        }
+        // Aac is not supported in IE below 11.0.
+        if ($extension === 'aac' && (self::is_ie() && !self::check_ie_version('11.0'))) {
+            return false;
+        }
+        // Mpeg is not supported in IE below 10.0.
+        $ismpeg = in_array($extension, ['m4a', 'mp3', 'm4v', 'mp4', 'fmp4']);
+        if ($ismpeg && (self::is_ie() && !self::check_ie_version('10.0'))) {
+            return false;
+        }
+        // Mov is not supported in IE.
+        if ($extension === 'mov' && self::is_ie()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if current browser supports the HLS and MPEG-DASH media
+     * streaming formats. Most browsers get this from Media Source Extensions.
+     * Safari on iOS, doesn't support MPEG-DASH at all.
+     *
+     * Note, the check here is not 100% accurate!
+     *
+     * Also we assume that users of Firefox/Chrome/Safari do not use the ancient versions of browsers.
+     * We check the exact version for IE/Edge though. We know that there are still users of very old
+     * versions that are afraid to upgrade or have slow IT department.
+     *
+     * Resources:
+     * https://developer.mozilla.org/en-US/docs/Web/API/Media_Source_Extensions_API
+     * https://caniuse.com/#search=mpeg-dash
+     * https://caniuse.com/#search=hls
+     *
+     * @param string $extension
+     * @return bool
+     */
+    public static function supports_media_source_extensions(string $extension) : bool {
+        // Not supported in IE below 11.0.
+        if (self::is_ie() && !self::check_ie_version('11.0')) {
+            return false;
+        }
+
+        if ($extension == '.mpd') {
+            // Not supported in Safari on iOS.
+            if (self::is_safari_ios()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

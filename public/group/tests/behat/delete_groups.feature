@@ -5,19 +5,18 @@ Feature: Automatic deletion of groups and groupings
   I need to create groups and groupings under different scenarios and check that the expected result occurs when attempting to delete them.
 
   Background:
-    Given the following "courses" exists:
+    Given the following "courses" exist:
       | fullname | shortname | format |
       | Course 1 | C1 | topics |
-    And the following "users" exists:
+    And the following "users" exist:
       | username | firstname | lastname | email |
-      | teacher1 | Teacher | 1 | teacher1@asd.com |
-    And the following "course enrolments" exists:
+      | teacher1 | Teacher | 1 | teacher1@example.com |
+    And the following "course enrolments" exist:
       | user | course | role |
       | teacher1 | C1 | editingteacher |
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I expand "Users" node
-    And I follow "Groups"
+    And I am on "Course 1" course homepage
+    And I navigate to "Users > Groups" in current page administration
     And I press "Create group"
     And I set the following fields to these values:
       | Group name | Group (without ID) |
@@ -65,9 +64,8 @@ Feature: Automatic deletion of groups and groupings
      | moodle/course:changeidnumber | Prevent |
     And I log out
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I expand "Users" node
-    And I follow "Groups"
+    And I am on "Course 1" course homepage
+    And I navigate to "Users > Groups" in current page administration
     When I set the field "groups" to "Group (with ID) (0)"
     Then the "Delete selected group" "button" should be disabled
     And I set the field "groups" to "Group (without ID) (0)"

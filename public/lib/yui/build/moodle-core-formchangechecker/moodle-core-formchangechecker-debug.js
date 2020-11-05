@@ -1,5 +1,31 @@
 YUI.add('moodle-core-formchangechecker', function (Y, NAME) {
 
+/**
+ * A utility to check for form changes before navigating away from a page.
+ *
+ * @module moodle-core-formchangechecker
+ */
+
+/**
+ * A utility to check for form changes before navigating away from a page.
+ *
+ * To initialise, call M.core_formchangechecker.init({formid: 'myform'}); or perhaps
+ *
+ * Y.use('moodle-core-formchangechecker', function() {
+ *     M.core_formchangechecker.init({formid: 'myform'});
+ * });
+ *
+ * If you have some fields in your form that you don't want to have tracked, then add
+ * a data-formchangechecker-ignore-dirty to the field, or any parent element, and it
+ * will be ignored.
+ *
+ * If you have a submit button in your form that does not actually save the data,
+ * then add a data-formchangechecker-ignore-submit attribute to it.
+ *
+ * @class M.core.formchangechecker
+ * @constructor
+ */
+
 var FORMCHANGECHECKERNAME = 'core-formchangechecker',
 
     FORMCHANGECHECKER = function() {
@@ -9,12 +35,14 @@ var FORMCHANGECHECKERNAME = 'core-formchangechecker',
 Y.extend(FORMCHANGECHECKER, Y.Base, {
 
         // The delegated listeners we need to detach after the initial value has been stored once
-        initialvaluelisteners : [],
+        initialvaluelisteners: [],
 
         /**
-          * Initialize the module
-          */
-        initializer : function() {
+         * Initialize the module
+         *
+         * @method initializer
+         */
+        initializer: function() {
             var formid = 'form#' + this.get('formid'),
                 currentform = Y.one(formid);
 
@@ -22,6 +50,13 @@ Y.extend(FORMCHANGECHECKER, Y.Base, {
                 // If the form was not found, then we can't check for changes.
                 return;
             }
+
+            if (!M.core_formchangechecker.stateinformation.formchanged) {
+                M.core_formchangechecker.stateinformation.formchanged = this.get('initialdirtystate');
+            }
+
+            // Add a listener here for an editor restore event.
+            Y.on(M.core.event.EDITOR_CONTENT_RESTORED, M.core_formchangechecker.reset_form_dirty_state, this);
 
             // Add change events to the form elements
             currentform.delegate('change', M.core_formchangechecker.set_form_changed, 'input', this);
@@ -33,8 +68,19 @@ Y.extend(FORMCHANGECHECKER, Y.Base, {
             this.initialvaluelisteners.push(currentform.delegate('focus', this.store_initial_value, 'textarea', this));
             this.initialvaluelisteners.push(currentform.delegate('focus', this.store_initial_value, 'select', this));
 
-            // We need any submit buttons on the form to set the submitted flag
-            Y.one(formid).on('submit', M.core_formchangechecker.set_form_submitted, this);
+            currentform.delegate('click', function() {
+                currentform.setData('ignoreSubmission', true);
+            }, '[data-formchangechecker-ignore-submit]');
+
+            // We need any submit buttons on the form to set the submitted flag.
+            Y.one(formid).on('submit', function() {
+                if (currentform.getData('ignoreSubmission')) {
+                    // But not if we have been told to ignore this button.
+                    currentform.clearData('ignoreSubmission');
+                    return;
+                }
+                M.core_formchangechecker.set_form_submitted();
+            }, this);
 
             // YUI doesn't support onbeforeunload properly so we must use the DOM to set the onbeforeunload. As
             // a result, the has_changed must stay in the DOM too
@@ -42,18 +88,24 @@ Y.extend(FORMCHANGECHECKER, Y.Base, {
         },
 
         /**
-          * Store the initial value of the currently focussed element
-          *
-          * If an element has been focussed and changed but not yet blurred, the on change
-          * event won't be fired. We need to store it's initial value to compare it in the
-          * get_form_dirty_state function later.
-          */
-        store_initial_value : function(e) {
+         * Store the initial value of the currently focussed element
+         *
+         * If an element has been focussed and changed but not yet blurred, the on change
+         * event won't be fired. We need to store it's initial value to compare it in the
+         * get_form_dirty_state function later.
+         *
+         * @method store_initial_value
+         * @param {EventFacade} e
+         */
+        store_initial_value: function(e) {
             var thisevent;
-            if (e.target.hasClass('ignoredirty')) {
-                // Don't warn on elements with the ignoredirty class
+
+            // Don't warn on elements we have been told to ignore.
+            if (e.target.ancestor('.ignoredirty', true) ||
+                    e.target.ancestor('[data-formchangechecker-ignore-dirty]', true)) {
                 return;
             }
+
             if (M.core_formchangechecker.get_form_dirty_state()) {
                 // Detach all listen events to prevent duplicate initial value setting
                 while (this.initialvaluelisteners.length) {
@@ -67,16 +119,19 @@ Y.extend(FORMCHANGECHECKER, Y.Base, {
             // Make a note of the current element so that it can be interrogated and
             // compared in the get_form_dirty_state function
             M.core_formchangechecker.stateinformation.focused_element = {
-                element : e.target,
-                initial_value : e.target.get('value')
+                element: e.target,
+                initial_value: e.target.get('value')
             };
         }
     },
     {
-        NAME : FORMCHANGECHECKERNAME,
-        ATTRS : {
-            formid : {
-                'value' : ''
+        NAME: FORMCHANGECHECKERNAME,
+        ATTRS: {
+            formid: {
+                'value': ''
+            },
+            initialdirtystate: {
+                'value': false
             }
         }
     }
@@ -95,14 +150,16 @@ M.core_formchangechecker.init = function(config) {
 // Store state information
 M.core_formchangechecker.stateinformation = [];
 
-/**
-  * Set the form changed state to true
-  */
+/*
+ * Set the form changed state to true
+ */
 M.core_formchangechecker.set_form_changed = function(e) {
-    if (e && e.target && e.target.hasClass('ignoredirty')) {
-        // Don't warn on elements with the ignoredirty class
+    // Don't warn on elements we have been told to ignore.
+    if (e && e.target && (e.target.ancestor('.ignoredirty', true) ||
+            e.target.ancestor('[data-formchangechecker-ignore-dirty]', true))) {
         return;
     }
+
     M.core_formchangechecker.stateinformation.formchanged = 1;
 
     // Once the form has been marked as dirty, we no longer need to keep track of form elements
@@ -110,19 +167,19 @@ M.core_formchangechecker.set_form_changed = function(e) {
     delete M.core_formchangechecker.stateinformation.focused_element;
 };
 
-/**
-  * Set the form submitted state to true
-  */
+/*
+ * Set the form submitted state to true
+ */
 M.core_formchangechecker.set_form_submitted = function() {
     M.core_formchangechecker.stateinformation.formsubmitted = 1;
 };
 
-/**
-  * Attempt to determine whether the form has been modified in any way and
-  * is thus 'dirty'
-  *
-  * @return Integer 1 is the form is dirty; 0 if not
-  */
+/*
+ * Attempt to determine whether the form has been modified in any way and
+ * is thus 'dirty'
+ *
+ * @return Integer 1 is the form is dirty; 0 if not
+ */
 M.core_formchangechecker.get_form_dirty_state = function() {
     var state = M.core_formchangechecker.stateinformation,
         editor;
@@ -148,9 +205,9 @@ M.core_formchangechecker.get_form_dirty_state = function() {
     // Handle TinyMCE editor instances
     // We can't add a listener in the initializer as the editors may not have been created by that point
     // so we do so here instead
-    if (typeof tinyMCE !== 'undefined') {
-        for (editor in tinyMCE.editors) {
-            if (tinyMCE.editors[editor].isDirty()) {
+    if (typeof window.tinyMCE !== 'undefined') {
+        for (editor in window.tinyMCE.editors) {
+            if (window.tinyMCE.editors[editor].isDirty()) {
                 return 1;
             }
         }
@@ -160,9 +217,17 @@ M.core_formchangechecker.get_form_dirty_state = function() {
     return 0;
 };
 
-/**
-  * Return a suitable message if changes have been made to a form
-  */
+/*
+ * Reset the form state
+ */
+M.core_formchangechecker.reset_form_dirty_state = function() {
+    M.core_formchangechecker.stateinformation.formsubmitted = false;
+    M.core_formchangechecker.stateinformation.formchanged = false;
+};
+
+/*
+ * Return a suitable message if changes have been made to a form
+ */
 M.core_formchangechecker.report_form_dirty_state = function(e) {
     if (!M.core_formchangechecker.get_form_dirty_state()) {
         // the form is not dirty, so don't display any message
@@ -188,4 +253,4 @@ M.core_formchangechecker.report_form_dirty_state = function(e) {
 };
 
 
-}, '@VERSION@', {"requires": ["base", "event-focus"]});
+}, '@VERSION@', {"requires": ["base", "event-focus", "moodle-core-event"]});

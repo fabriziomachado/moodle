@@ -26,7 +26,7 @@ namespace logstore_standard\log;
 
 defined('MOODLE_INTERNAL') || die();
 
-class store implements \tool_log\log\writer, \core\log\sql_internal_reader {
+class store implements \tool_log\log\writer, \core\log\sql_internal_table_reader {
     use \tool_log\helper\store,
         \tool_log\helper\buffered_writer,
         \tool_log\helper\reader;
@@ -38,66 +38,105 @@ class store implements \tool_log\log\writer, \core\log\sql_internal_reader {
         $this->helper_setup($manager);
         // Log everything before setting is saved for the first time.
         $this->logguests = $this->get_config('logguests', 1);
+        // JSON writing defaults to false (table format compatibility with older versions).
+        // Note: This variable is defined in the buffered_writer trait.
+        $this->jsonformat = (bool)$this->get_config('jsonformat', false);
+    }
+
+    /**
+     * Should the event be ignored (== not logged)?
+     * @param \core\event\base $event
+     * @return bool
+     */
+    protected function is_event_ignored(\core\event\base $event) {
+        if ((!CLI_SCRIPT or PHPUNIT_TEST) and !$this->logguests) {
+            // Always log inside CLI scripts because we do not login there.
+            if (!isloggedin() or isguestuser()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * Finally store the events into the database.
      *
-     * @param \core\event\base[] $events
+     * @param array $evententries raw event data
      */
-    protected function insert_events($events) {
+    protected function insert_event_entries($evententries) {
         global $DB;
 
-        $dataobj = array();
-
-        // Filter events.
-        foreach ($events as $event) {
-            if ((!CLI_SCRIPT or PHPUNIT_TEST) and !$this->logguests) {
-                // Always log inside CLI scripts because we do not login there.
-                if (!isloggedin() or isguestuser()) {
-                    continue;
-                }
-            }
-
-            $data = $event->get_data();
-            $data['other'] = serialize($data['other']);
-            if (CLI_SCRIPT) {
-                $data['origin'] = 'cli';
-                $data['ip'] = null;
-            } else {
-                $data['origin'] = 'web';
-                $data['ip'] = getremoteaddr();
-            }
-            $data['realuserid'] = \core\session\manager::is_loggedinas() ? $_SESSION['USER']->realuser : null;
-            $dataobj[] = $data;
-        }
-
-        $DB->insert_records('logstore_standard_log', $dataobj);
+        $DB->insert_records('logstore_standard_log', $evententries);
     }
 
     public function get_events_select($selectwhere, array $params, $sort, $limitfrom, $limitnum) {
         global $DB;
 
+        $sort = self::tweak_sort_by_id($sort);
+
         $events = array();
-        $records = $DB->get_records_select('logstore_standard_log', $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
+        $records = $DB->get_recordset_select('logstore_standard_log', $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
 
         foreach ($records as $data) {
-            $extra = array('origin' => $data->origin, 'ip' => $data->ip, 'realuserid' => $data->realuserid);
-            $data = (array)$data;
-            $id = $data['id'];
-            $data['other'] = unserialize($data['other']);
-            if ($data['other'] === false) {
-                $data['other'] = array();
+            if ($event = $this->get_log_event($data)) {
+                $events[$data->id] = $event;
             }
-            unset($data['origin']);
-            unset($data['ip']);
-            unset($data['realuserid']);
-            unset($data['id']);
-
-            $events[$id] = \core\event\base::restore($data, $extra);
         }
 
+        $records->close();
+
         return $events;
+    }
+
+    /**
+     * Fetch records using given criteria returning a Traversable object.
+     *
+     * Note that the traversable object contains a moodle_recordset, so
+     * remember that is important that you call close() once you finish
+     * using it.
+     *
+     * @param string $selectwhere
+     * @param array $params
+     * @param string $sort
+     * @param int $limitfrom
+     * @param int $limitnum
+     * @return \core\dml\recordset_walk|\core\event\base[]
+     */
+    public function get_events_select_iterator($selectwhere, array $params, $sort, $limitfrom, $limitnum) {
+        global $DB;
+
+        $sort = self::tweak_sort_by_id($sort);
+
+        $recordset = $DB->get_recordset_select('logstore_standard_log', $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
+
+        return new \core\dml\recordset_walk($recordset, array($this, 'get_log_event'));
+    }
+
+    /**
+     * Returns an event from the log data.
+     *
+     * @param stdClass $data Log data
+     * @return \core\event\base
+     */
+    public function get_log_event($data) {
+
+        $extra = array('origin' => $data->origin, 'ip' => $data->ip, 'realuserid' => $data->realuserid);
+        $data = (array)$data;
+        $id = $data['id'];
+        $data['other'] = self::decode_other($data['other']);
+        if ($data['other'] === false) {
+            $data['other'] = array();
+        }
+        unset($data['origin']);
+        unset($data['ip']);
+        unset($data['realuserid']);
+        unset($data['id']);
+
+        if (!$event = \core\event\base::restore($data, $extra)) {
+            return null;
+        }
+
+        return $event;
     }
 
     public function get_events_select_count($selectwhere, array $params) {
@@ -107,19 +146,6 @@ class store implements \tool_log\log\writer, \core\log\sql_internal_reader {
 
     public function get_internal_log_table_name() {
         return 'logstore_standard_log';
-    }
-
-    public function cron() {
-        global $DB;
-        $loglifetime = $this->get_config('loglifetime', 0);
-
-        // NOTE: we should do this only once a day, new cron will deal with this.
-
-        if ($loglifetime > 0) {
-            $loglifetime = time() - ($loglifetime * 3600 * 24); // Value in days.
-            $DB->delete_records_select("logstore_standard_log", "timecreated < ?", array($loglifetime));
-            mtrace(" Deleted old log records from standard store.");
-        }
     }
 
     /**

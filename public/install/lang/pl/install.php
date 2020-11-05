@@ -34,8 +34,8 @@ $string['admindirname'] = 'Katalog admin';
 $string['availablelangs'] = 'Dostępne paczki językowe';
 $string['chooselanguagehead'] = 'Wybierz język';
 $string['chooselanguagesub'] = 'Proszę wybrać język do instalacji. Ten język będzie również użyty jako domyślny język witryny, przy czym może być później zmieniony.';
-$string['clialreadyconfigured'] = 'Plik config.php już istnieje, użyj admin/cli/install_database.php jeśli chcesz zainstalować tę witrynę.';
-$string['clialreadyinstalled'] = 'Plik config.php już istnieje, użyj admin/cli/upgrade.php, jeśli chcesz uaktualnić witrynę.';
+$string['clialreadyconfigured'] = 'Plik config.php już istnieje. Użyj admin/cli/install_database.php jeśli chcesz zainstalować Moodle dla tej strony.';
+$string['clialreadyinstalled'] = 'Plik config.php już istnieje. Użyj admin/cli/install_database.php jeśli chcesz zaktualizować Moodle dla tej strony.';
 $string['cliinstallheader'] = 'Program instalacyjny Moodle {$a} z linii poleceń';
 $string['databasehost'] = 'Host bazy danych';
 $string['databasename'] = 'Nazwa bazy danych';
@@ -76,9 +76,9 @@ $string['pathsunsecuredataroot'] = 'Lokalizacja głównego katalogu danych nie j
 $string['pathswrongadmindir'] = 'Katalog admin nie istnieje';
 $string['phpextension'] = 'rozszerzenie PHP {$a}';
 $string['phpversion'] = 'Wersja PHP';
-$string['phpversionhelp'] = '<p>Moodle wymaga wersji PHP co najmniej 4.3.0 lub 5.1.0 (5.0.x posiada kilka znanych problemów).</p>
-<p>Obecnie jest uruchomiona wersja {$a}</p>
-<p>Musisz uaktualnić wersję PHP lub przenieść na host z nowszą wersją PHP!<br />(W przypadku wersji 5.0.x możesz dokonać downgrade do wersji 4.4.x)</p>';
+$string['phpversionhelp'] = '<p>Moodle wymaga wersji PHP co najmniej 5.6.5 lub 7.1 (7.0.x ma pewne ograniczenia silnika).</p>
+<p>Aktualnie używasz wersji {$a}.</p>
+<p>Musisz zaktualizować PHP lub przenieść na host z nowszą wersją PHP.</p>';
 $string['welcomep10'] = '{$a->installername} ({$a->installerversion})';
 $string['welcomep20'] = 'Widzisz tę stronę, ponieważ z powodzeniem zainstalowałeś i uruchomiłeś <strong>{$a->packname} {$a->packversion}</strong> na swoim komputerze.';
 $string['welcomep30'] = 'Ten instalator <strong>{$a->installername}</strong> zawiera aplikacje, by stworzyć środowisko, w którym będzie działać <strong>Moodle</strong>, czyli';

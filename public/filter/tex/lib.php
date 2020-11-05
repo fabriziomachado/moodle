@@ -29,15 +29,6 @@ defined('MOODLE_INTERNAL') || die();
 function filter_tex_get_executable($debug=false) {
     global $CFG;
 
-    $error_message1 = "Your system is not configured to run mimeTeX. You need to download the appropriate<br />"
-                     ."executable for you ".PHP_OS." platform from <a href=\"http://moodle.org/download/mimetex/\">"
-                     ."http://moodle.org/download/mimetex/</a>, or obtain the C source<br /> "
-                     ."from <a href=\"http://www.forkosh.com/mimetex.zip\">"
-                     ."http://www.forkosh.com/mimetex.zip</a>, compile it and "
-                     ."put the executable into your<br /> moodle/filter/tex/ directory.";
-
-    $error_message2 = "Custom mimetex is not executable!<br /><br />";
-
     if ((PHP_OS == "WINNT") || (PHP_OS == "WIN32") || (PHP_OS == "Windows")) {
         return "$CFG->dirroot/filter/tex/mimetex.exe";
     }
@@ -125,15 +116,24 @@ function filter_tex_updatedcallback($name) {
         return;
     }
 
-    $pathdvips = get_config('filter_tex', 'pathdvips');
-    $pathconvert = get_config('filter_tex', 'pathconvert');
+    $pathlatex = trim($pathlatex, " '\"");
+    $pathdvips = trim(get_config('filter_tex', 'pathdvips'), " '\"");
+    $pathconvert = trim(get_config('filter_tex', 'pathconvert'), " '\"");
+    $pathdvisvgm = trim(get_config('filter_tex', 'pathdvisvgm'), " '\"");
 
-    if (!(is_file($pathlatex) && is_executable($pathlatex) &&
-          is_file($pathdvips) && is_executable($pathdvips) &&
-          is_file($pathconvert) && is_executable($pathconvert))) {
-        // LaTeX, dvips or convert are not available, and mimetex can only produce GIFs so...
-        set_config('convertformat', 'gif', 'filter_tex');
+    $supportedformats = array('gif');
+    if ((is_file($pathlatex) && is_executable($pathlatex)) &&
+            (is_file($pathdvips) && is_executable($pathdvips))) {
+        if (is_file($pathconvert) && is_executable($pathconvert)) {
+             $supportedformats[] = 'png';
+        }
+        if (is_file($pathdvisvgm) && is_executable($pathdvisvgm)) {
+             $supportedformats[] = 'svg';
+        }
     }
-}
+    if (!in_array(get_config('filter_tex', 'convertformat'), $supportedformats)) {
+        set_config('convertformat', array_pop($supportedformats), 'filter_tex');
+    }
 
+}
 

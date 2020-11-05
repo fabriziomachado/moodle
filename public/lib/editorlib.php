@@ -95,7 +95,7 @@ function editors_get_enabled() {
     global $CFG;
 
     if (empty($CFG->texteditors)) {
-        $CFG->texteditors = 'tinymce,textarea';
+        $CFG->texteditors = 'atto,tinymce,textarea';
     }
     $active = array();
     foreach(explode(',', $CFG->texteditors) as $e) {
@@ -153,7 +153,7 @@ function editors_head_setup() {
     global $CFG;
 
     if (empty($CFG->texteditors)) {
-        $CFG->texteditors = 'tinymce,textarea';
+        $CFG->texteditors = 'atto,tinymce,textarea';
     }
     $active = explode(',', $CFG->texteditors);
 
@@ -202,9 +202,35 @@ abstract class texteditor {
     public abstract function supports_repositories();
 
     /**
+     * @var string $text The text set to the editor in the form.
+     * @since 3.0
+     */
+    protected $text = '';
+
+    /**
+     * Set the text set for this form field. Will be called before "use_editor".
+     * @param string $text The text for the form field.
+     */
+    public function set_text($text) {
+        $this->text = $text;
+    }
+
+    /**
+     * Get the text set for this form field. Can be called from "use_editor".
+     * @return string
+     */
+    public function get_text() {
+        return $this->text;
+    }
+
+    /**
      * Add required JS needed for editor
+     *
+     * Valid options may vary by editor. See the individual editor
+     * implementations of this function for documentation.
+     *
      * @param string $elementid id of text area to be converted to editor
-     * @param array $options
+     * @param array $options Editor options
      * @param obejct $fpoptions file picker options
      * @return void
      */

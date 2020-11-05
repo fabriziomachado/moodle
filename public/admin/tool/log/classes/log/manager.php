@@ -107,6 +107,72 @@ class manager implements \core\log\manager {
                 $return[$plugin] = $reader;
             }
         }
+
+        return $return;
+    }
+
+    /**
+     * Get a list of reports that support the given store instance.
+     *
+     * @param string $logstore Name of the store.
+     *
+     * @return array List of supported reports
+     */
+    public function get_supported_reports($logstore) {
+
+        $allstores = self::get_store_plugins();
+        if (empty($allstores[$logstore])) {
+            // Store doesn't exist.
+            return array();
+        }
+
+        $reports = get_plugin_list_with_function('report', 'supports_logstore', 'lib.php');
+        $enabled = $this->stores;
+
+        if (empty($enabled[$logstore])) {
+            // Store is not enabled, init an instance.
+            $classname = '\\' . $logstore . '\log\store';
+            $instance = new $classname($this);
+        } else {
+            $instance = $enabled[$logstore];
+        }
+
+        $return = array();
+        foreach ($reports as $report => $fulldir) {
+            if (component_callback($report, 'supports_logstore', array($instance), false)) {
+                $return[$report] = get_string('pluginname', $report);
+            }
+        }
+
+        return $return;
+    }
+
+    /**
+     * For a given report, returns a list of log stores that are supported.
+     *
+     * @param string $component component.
+     *
+     * @return false|array list of logstores that support the given report. It returns false if the given $component doesn't
+     *      require logstores.
+     */
+    public function get_supported_logstores($component) {
+
+        $allstores = self::get_store_plugins();
+        $enabled = $this->stores;
+
+        $function = component_callback_exists($component, 'supports_logstore');
+        if (!$function) {
+            // The report doesn't define the callback, most probably it doesn't need log stores.
+            return false;
+        }
+
+        $return = array();
+        foreach ($allstores as $store => $logclass) {
+            $instance = empty($enabled[$store]) ? new $logclass($this) : $enabled[$store];
+            if ($function($instance)) {
+                $return[$store] = get_string('pluginname', $store);
+            }
+        }
         return $return;
     }
 
@@ -135,16 +201,6 @@ class manager implements \core\log\manager {
     }
 
     /**
-     * Execute cron actions.
-     */
-    public function cron() {
-        $this->init();
-        foreach ($this->stores as $store) {
-            $store->cron();
-        }
-    }
-
-    /**
      * Legacy add_to_log() redirection.
      *
      * To be used only from deprecated add_to_log() function and event trigger() method.
@@ -158,11 +214,14 @@ class manager implements \core\log\manager {
      * @param string $info Additional description information
      * @param int $cm The course_module->id if there is one
      * @param int|\stdClass $user If log regards $user other than $USER
+     * @param string $ip Override the IP, should only be used for restore.
+     * @param int $time Override the log time, should only be used for restore.
      */
-    public function legacy_add_to_log($courseid, $module, $action, $url = '', $info = '', $cm = 0, $user = 0) {
+    public function legacy_add_to_log($courseid, $module, $action, $url = '', $info = '',
+                                      $cm = 0, $user = 0, $ip = null, $time = null) {
         $this->init();
         if (isset($this->stores['logstore_legacy'])) {
-            $this->stores['logstore_legacy']->legacy_add_to_log($courseid, $module, $action, $url, $info, $cm, $user);
+            $this->stores['logstore_legacy']->legacy_add_to_log($courseid, $module, $action, $url, $info, $cm, $user, $ip, $time);
         }
     }
 }

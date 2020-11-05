@@ -14,18 +14,27 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+/**
+ * Role allow override updated event.
+ *
+ * @package    core
+ * @since      Moodle 2.6
+ * @copyright  2013 Rajesh Taneja <rajesh@moodle.com>
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
 namespace core\event;
 
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Event when role allow override is updated.
+ * Role allow override updated event class.
  *
- * @package    core_event
+ * @package    core
+ * @since      Moodle 2.6
  * @copyright  2013 Rajesh Taneja <rajesh@moodle.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
-
 class role_allow_override_updated extends base {
     /**
      * Initialise event parameters.
@@ -33,6 +42,7 @@ class role_allow_override_updated extends base {
     protected function init() {
         $this->data['crud'] = 'u';
         $this->data['edulevel'] = self::LEVEL_OTHER;
+        $this->data['objecttable'] = 'role_allow_override';
     }
 
     /**
@@ -50,7 +60,9 @@ class role_allow_override_updated extends base {
      * @return string
      */
     public function get_description() {
-        return 'Allow role override updated by user ' . $this->userid;
+        $action = ($this->other['allow']) ? 'allow' : 'stop allowing';
+        return "The user with id '$this->userid' modified the role with id '" . $this->other['targetroleid']
+            . "' to $action users with that role from overriding the role with id '" . $this->objectid . "' to users";
     }
 
     /**

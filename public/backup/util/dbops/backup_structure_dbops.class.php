@@ -34,10 +34,12 @@ abstract class backup_structure_dbops extends backup_dbops {
 
     public static function get_iterator($element, $params, $processor) {
         global $DB;
+
         // Check we are going to get_iterator for one backup_nested_element
         if (! $element instanceof backup_nested_element) {
             throw new base_element_struct_exception('backup_nested_element_expected');
         }
+
         // If var_array, table and sql are null, and element has no final elements it is one nested element without source
         // Just return one 1 element iterator without information
         if ($element->get_source_array() === null && $element->get_source_table() === null &&
@@ -58,7 +60,7 @@ abstract class backup_structure_dbops extends backup_dbops {
         }
     }
 
-    protected static function convert_params_to_values($params, $processor) {
+    public static function convert_params_to_values($params, $processor) {
         $newparams = array();
         foreach ($params as $key => $param) {
             $newvalue = null;
@@ -103,7 +105,18 @@ abstract class backup_structure_dbops extends backup_dbops {
         }
     }
 
-    public static function annotate_files($backupid, $contextid, $component, $filearea, $itemid) {
+    /**
+     * Adds backup id database record for all files in the given file area.
+     *
+     * @param string $backupid Backup ID
+     * @param int $contextid Context id
+     * @param string $component Component
+     * @param string $filearea File area
+     * @param int $itemid Item id
+     * @param \core\progress\base $progress
+     */
+    public static function annotate_files($backupid, $contextid, $component, $filearea, $itemid,
+            \core\progress\base $progress = null) {
         global $DB;
         $sql = 'SELECT id
                   FROM {files}
@@ -120,9 +133,18 @@ abstract class backup_structure_dbops extends backup_dbops {
             $sql .= ' AND itemid = ?';
             $params[] = $itemid;
         }
+        if ($progress) {
+            $progress->start_progress('');
+        }
         $rs = $DB->get_recordset_sql($sql, $params);
         foreach ($rs as $record) {
+            if ($progress) {
+                $progress->progress();
+            }
             self::insert_backup_ids_record($backupid, 'file', $record->id);
+        }
+        if ($progress) {
+            $progress->end_progress();
         }
         $rs->close();
     }

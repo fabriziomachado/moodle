@@ -6,17 +6,17 @@
 
 var BODY = Y.one(Y.config.doc.body),
     CSS = {
-        MENUSHOWN : 'action-menu-shown'
+        MENUSHOWN: 'action-menu-shown'
     },
     SELECTOR = {
         CAN_RECEIVE_FOCUS_SELECTOR: 'input:not([type="hidden"]), a[href], button, textarea, select, [tabindex]',
-        MENU : '.moodle-actionmenu[data-enhance=moodle-core-actionmenu]',
+        MENU: '.moodle-actionmenu[data-enhance=moodle-core-actionmenu]',
         MENUBAR: '[role="menubar"]',
         MENUITEM: '[role="menuitem"]',
-        MENUCONTENT : '.menu[data-rel=menu-content]',
+        MENUCONTENT: '.menu[data-rel=menu-content]',
         MENUCONTENTCHILD: 'li a',
         MENUCHILD: '.menu li a',
-        TOGGLE : '.toggle-display',
+        TOGGLE: '.toggle-display',
         KEEPOPEN: '[data-keepopen="1"]',
         MENUBARITEMS: [
             '[role="menubar"] > [role="menuitem"]',
@@ -29,10 +29,10 @@ var BODY = Y.one(Y.config.doc.body),
     },
     ACTIONMENU,
     ALIGN = {
-        TL : 'tl',
-        TR : 'tr',
-        BL : 'bl',
-        BR : 'br'
+        TL: 'tl',
+        TR: 'tr',
+        BL: 'bl',
+        BR: 'br'
     };
 
 /**
@@ -43,7 +43,7 @@ var BODY = Y.one(Y.config.doc.body),
  * @namespace M.core.actionmenu
  * @class ActionMenu
  * @constructor
- * @extends Y.Base
+ * @extends Base
  */
 ACTIONMENU = function() {
     ACTIONMENU.superclass.constructor.apply(this, arguments);
@@ -56,7 +56,7 @@ ACTIONMENU.prototype = {
      * @type M.core.dialogue
      * @protected
      */
-    dialogue : null,
+    dialogue: null,
 
     /**
      * An array of events attached during the display of the dialogue.
@@ -64,12 +64,16 @@ ACTIONMENU.prototype = {
      * @type Object
      * @protected
      */
-    events : [],
+    events: [],
 
     /**
      * The node that owns the currently displayed menu.
+     *
+     * @property owner
+     * @type Node
+     * @default null
      */
-    owner : null,
+    owner: null,
 
     /**
      * The menu button that toggles this open.
@@ -109,9 +113,10 @@ ACTIONMENU.prototype = {
 
     /**
      * Called during the initialisation process of the object.
+     *
      * @method initializer
      */
-    initializer : function() {
+    initializer: function() {
         Y.log('Initialising the action menu manager', 'debug', ACTIONMENU.NAME);
         Y.all(SELECTOR.MENU).each(this.enhance, this);
         BODY.delegate('key', this.moveMenuItem, 'down:37,39', SELECTOR.MENUBARITEMS.join(','), this);
@@ -129,10 +134,11 @@ ACTIONMENU.prototype = {
     /**
      * Enhances a menu adding aria attributes and flagging it as functional.
      *
+     * @method enhance
      * @param {Node} menu
-     * @returns {boolean}
+     * @return boolean
      */
-    enhance : function(menu) {
+    enhance: function(menu) {
         var menucontent = menu.one(SELECTOR.MENUCONTENT),
             align;
         if (!menucontent) {
@@ -141,10 +147,10 @@ ACTIONMENU.prototype = {
         align = menucontent.getData('align') || this.get('align').join('-');
         menu.one(SELECTOR.TOGGLE).set('aria-haspopup', true);
         menucontent.set('aria-hidden', true);
-        if (!menucontent.hasClass('align-'+align)) {
-            menucontent.addClass('align-'+align);
+        if (!menucontent.hasClass('align-' + align)) {
+            menucontent.addClass('align-' + align);
         }
-        if (menucontent.hasChildNodes()) {
+        if (menucontent.getDOMNode().childElementCount) {
             menu.setAttribute('data-enhanced', '1');
         }
     },
@@ -182,7 +188,8 @@ ACTIONMENU.prototype = {
      */
     getMenuItem: function(currentItem, previous) {
         var menubar = currentItem.ancestor(SELECTOR.MENUBAR),
-            menuitems;
+            menuitems,
+            next;
 
         if (!menubar) {
             return null;
@@ -238,9 +245,10 @@ ACTIONMENU.prototype = {
 
     /**
      * Hides the menu if it is visible.
+     * @param {EventFacade} e
      * @method hideMenu
      */
-    hideMenu : function() {
+    hideMenu: function(e) {
         if (this.dialogue) {
             Y.log('Hiding an action menu', 'debug', ACTIONMENU.NAME);
             this.dialogue.removeClass('show');
@@ -259,7 +267,9 @@ ACTIONMENU.prototype = {
         }
 
         if (this.menulink) {
-            this.menulink.focus();
+            if (e.type != 'click') {
+                this.menulink.focus();
+            }
             this.menulink = null;
         }
     },
@@ -280,13 +290,13 @@ ACTIONMENU.prototype = {
      * @method toggleMenu
      * @param {EventFacade} e
      */
-    toggleMenu : function(e) {
+    toggleMenu: function(e) {
         var menu = e.target.ancestor(SELECTOR.MENU),
             menuvisible = (menu.hasClass('show'));
 
         // Prevent event propagation as it will trigger the hideIfOutside event handler in certain situations.
         e.halt(true);
-        this.hideMenu();
+        this.hideMenu(e);
         if (menuvisible) {
             // The menu was visible and the user has clicked to toggle it again.
             return;
@@ -305,43 +315,49 @@ ACTIONMENU.prototype = {
      */
     handleKeyboardEvent: function(e) {
         var next;
+        var markEventHandled = function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        };
 
         // Handle when the menu is still selected.
         if (e.currentTarget.ancestor(SELECTOR.TOGGLE, true)) {
             if ((e.keyCode === 40 || (e.keyCode === 9 && !e.shiftKey)) && this.firstMenuChild) {
                 this.firstMenuChild.focus();
-                e.preventDefault();
+                markEventHandled(e);
             } else if (e.keyCode === 38 && this.lastMenuChild) {
                 this.lastMenuChild.focus();
-                e.preventDefault();
+                markEventHandled(e);
             } else if (e.keyCode === 9 && e.shiftKey) {
-                this.hideMenu();
-                e.preventDefault();
+                this.hideMenu(e);
+                markEventHandled(e);
             }
             return this;
         }
 
         if (e.keyCode === 27) {
             // The escape key was pressed so close the menu.
-            this.hideMenu();
-            e.preventDefault();
+            this.hideMenu(e);
+            markEventHandled(e);
 
         } else if (e.keyCode === 32) {
             // The space bar was pressed. Trigger a click.
-            e.preventDefault();
+            markEventHandled(e);
             e.currentTarget.simulate('click');
         } else if (e.keyCode === 9) {
             // The tab key was pressed. Tab moves forwards, Shift + Tab moves backwards through the menu options.
-            // We only override the Shift + Tab on the first option, and Tab on the last option to change where the focus is moved to.
+            // We only override the Shift + Tab on the first option, and Tab on the last option to change where the
+            // focus is moved to.
             if (e.target === this.firstMenuChild && e.shiftKey) {
-                this.hideMenu();
-                e.preventDefault();
+                this.hideMenu(e);
+                markEventHandled(e);
             } else if (e.target === this.lastMenuChild && !e.shiftKey) {
-                if (this.hideMenu()) {
+                if (this.hideMenu(e)) {
                     // Determine the next selector and focus on it.
                     next = this.menulink.next(SELECTOR.CAN_RECEIVE_FOCUS_SELECTOR);
                     if (next) {
                         next.focus();
+                        markEventHandled(e);
                     }
                 }
             }
@@ -390,7 +406,7 @@ ACTIONMENU.prototype = {
 
             if (next) {
                 next.focus();
-                e.preventDefault();
+                markEventHandled(e);
             }
         }
     },
@@ -402,19 +418,21 @@ ACTIONMENU.prototype = {
      * @method hideIfOutside
      * @param {EventFacade} e
      */
-    hideIfOutside : function(e) {
-        if (!e.target.ancestor(SELECTOR.MENUCHILD, true)) {
-            this.hideMenu();
+    hideIfOutside: function(e) {
+        if (!e.target.ancestor(SELECTOR.MENUCONTENT, true)) {
+            this.hideMenu(e);
         }
     },
 
     /**
      * Displays the menu with the given content and alignment.
+     *
+     * @method showMenu
      * @param {EventFacade} e
      * @param {Node} menu
-     * @returns {M.core.dialogue|dialogue}
+     * @return M.core.dialogue
      */
-    showMenu : function(e, menu) {
+    showMenu: function(e, menu) {
         Y.log('Displaying an action menu', 'debug', ACTIONMENU.NAME);
         var ownerselector = menu.getData('owner'),
             menucontent = menu.one(SELECTOR.MENUCONTENT);
@@ -430,9 +448,9 @@ ACTIONMENU.prototype = {
         this.constrain(menucontent.set('aria-hidden', false));
 
         this.menuChildren = this.dialogue.all(SELECTOR.MENUCHILD);
-        if (this.menuChildren) {
+        if (this.menuChildren.size() > 0) {
             this.firstMenuChild = this.menuChildren.item(0);
-            this.lastMenuChild  = this.menuChildren.item(this.menuChildren.size() - 1);
+            this.lastMenuChild = this.menuChildren.item(this.menuChildren.size() - 1);
 
             this.firstMenuChild.focus();
         }
@@ -447,14 +465,17 @@ ACTIONMENU.prototype = {
         this.events.push(BODY.delegate('focus', this.hideIfOutside, '*', this));
 
         // Check keyboard changes.
-        this.events.push(menu.delegate('key', this.handleKeyboardEvent, 'down:9, 27, 38, 40, 32', SELECTOR.MENUCHILD + ', ' + SELECTOR.TOGGLE, this));
+        this.events.push(
+            menu.delegate('key', this.handleKeyboardEvent,
+                          'down:9, 27, 38, 40, 32', SELECTOR.MENUCHILD + ', ' + SELECTOR.TOGGLE, this)
+            );
 
         // Close the menu after a button was pushed.
         this.events.push(menu.delegate('click', function(e) {
             if (e.currentTarget.test(SELECTOR.KEEPOPEN)) {
                 return;
             }
-            this.hideMenu();
+            this.hideMenu(e);
         }, SELECTOR.MENUCHILD, this));
 
         return true;
@@ -466,7 +487,7 @@ ACTIONMENU.prototype = {
      * @method constrain
      * @param {Node} node
      */
-    constrain : function(node) {
+    constrain: function(node) {
         var selector = node.getData('constraint'),
             nx = node.getX(),
             ny = node.getY(),
@@ -552,10 +573,10 @@ ACTIONMENU.prototype = {
 };
 
 Y.extend(ACTIONMENU, Y.Base, ACTIONMENU.prototype, {
-    NAME : 'moodle-core-actionmenu',
-    ATTRS : {
-        align : {
-            value : [
+    NAME: 'moodle-core-actionmenu',
+    ATTRS: {
+        align: {
+            value: [
                 ALIGN.TR, // The dialogue.
                 ALIGN.BR  // The button
             ]
@@ -563,32 +584,21 @@ Y.extend(ACTIONMENU, Y.Base, ACTIONMENU.prototype, {
     }
 });
 
-/**
- * Core namespace.
- * @static
- * @class core
- */
 M.core = M.core || {};
-
-/**
- * Actionmenu namespace.
- * @namespace M.core
- * @class actionmenu
- * @static
- */
 M.core.actionmenu = M.core.actionmenu || {};
 
 /**
  *
  * @static
- * @property instance
+ * @property M.core.actionmenu.instance
  * @type {ACTIONMENU}
  */
 M.core.actionmenu.instance = null;
 
 /**
  * Init function - will only ever create one instance of the actionmenu class.
- * @method init
+ *
+ * @method M.core.actionmenu.init
  * @static
  * @param {Object} params
  */
@@ -598,8 +608,10 @@ M.core.actionmenu.init = M.core.actionmenu.init || function(params) {
 
 /**
  * Registers a new DOM node with the action menu causing it to be enhanced if required.
+ *
+ * @method M.core.actionmenu.newDOMNode
  * @param node
- * @returns {boolean}
+ * @return {boolean}
  */
 M.core.actionmenu.newDOMNode = function(node) {
     if (M.core.actionmenu.instance === null) {

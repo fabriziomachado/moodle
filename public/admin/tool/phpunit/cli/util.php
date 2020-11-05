@@ -50,16 +50,13 @@ list($options, $unrecognized) = cli_get_params(
     )
 );
 
-if (file_exists(__DIR__.'/../../../../vendor/phpunit/phpunit/PHPUnit/Autoload.php')) {
+if (file_exists(__DIR__.'/../../../../vendor/phpunit/phpunit/composer.json')) {
     // Composer packages present.
     require_once(__DIR__.'/../../../../vendor/autoload.php');
-    require_once(__DIR__.'/../../../../vendor/phpunit/phpunit/PHPUnit/Autoload.php');
 
 } else {
-    // Verify PHPUnit PEAR libs can be loaded.
-    if (!include('PHPUnit/Autoload.php')) {
-        phpunit_bootstrap_error(PHPUNIT_EXITCODE_PHPUNITMISSING);
-    }
+    // Note: installation via PEAR is not supported any more.
+    phpunit_bootstrap_error(PHPUNIT_EXITCODE_PHPUNITMISSING);
 }
 
 if ($options['install'] or $options['drop']) {
@@ -77,7 +74,7 @@ if ($options['run']) {
         }
     }
     $_SERVER['argv'] = array_values($_SERVER['argv']);
-    PHPUnit_TextUI_Command::main();
+    PHPUnit\TextUI\Command::main();
     exit(0);
 }
 

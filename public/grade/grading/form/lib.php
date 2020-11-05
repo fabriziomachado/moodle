@@ -428,6 +428,7 @@ abstract class gradingform_controller {
         foreach ($records as $record) {
             $rv[] = $this->get_instance($record);
         }
+        $records->close();
         return $rv;
     }
 
@@ -520,13 +521,53 @@ abstract class gradingform_controller {
      * @param int $raterid
      * @param int $itemid
      * @return gradingform_instance
+     * @throws dml_exception
      */
     public function get_or_create_instance($instanceid, $raterid, $itemid) {
-        global $DB;
-        if ($instanceid &&
-                $instance = $DB->get_record('grading_instances', array('id'  => $instanceid, 'raterid' => $raterid, 'itemid' => $itemid), '*', IGNORE_MISSING)) {
-            return $this->get_instance($instance);
+        if (!is_numeric($instanceid)) {
+            $instanceid = null;
         }
+        return $this->fetch_instance($raterid, $itemid, $instanceid);
+    }
+
+    /**
+     * If an instanceid is specified and grading instance exists and it is created by this rater for
+     * this item, then the instance is returned.
+     *
+     * If instanceid is not known, then null can be passed to fetch the current instance matchign the specified raterid
+     * and itemid.
+     *
+     * If the instanceid is falsey, or no instance was found, then create a new instance for the specified rater and item.
+     *
+     * @param int $raterid
+     * @param int $itemid
+     * @param int $instanceid
+     * @return gradingform_instance
+     * @throws dml_exception
+     */
+    public function fetch_instance(int $raterid, int $itemid, ?int $instanceid): gradingform_instance {
+        global $DB;
+
+        $instance = null;
+        if (null === $instanceid) {
+            if ($instance = $this->get_current_instance($raterid, $itemid)) {
+                return $instance;
+            }
+            $instanceid = $instancerecord->id ?? null;
+        }
+
+        if (!empty($instanceid)) {
+            $instance = $DB->get_record('grading_instances', [
+                'id'  => $instanceid,
+                'raterid' => $raterid,
+                'itemid' => $itemid,
+            ], '*', IGNORE_MISSING);
+
+            if ($instance) {
+                return $this->get_instance($instance);
+            }
+        }
+
         return $this->create_instance($raterid, $itemid);
     }
 
@@ -936,6 +977,28 @@ abstract class gradingform_instance {
     abstract public function get_grade();
 
     /**
+     * Determines whether the submitted form was empty.
+     *
+     * @param array $elementvalue value of element submitted from the form
+     * @return boolean true if the form is empty
+     */
+    public function is_empty_form($elementvalue) {
+        return false;
+    }
+
+    /**
+     * Removes the attempt from the gradingform_*_fillings table.
+     * This function is not abstract as to not break plugins that might
+     * use advanced grading.
+     * @param array $data the attempt data
+     */
+    public function clear_attempt($data) {
+        // This function is empty because the way to clear a grade
+        // attempt will be different depending on the grading method.
+        return;
+    }
+
+    /**
      * Called when teacher submits the grading form:
      * updates the instance in DB, marks it as ACTIVE and returns the grade to be pushed to the gradebook.
      * $itemid must be specified here (it was not required when the instance was
@@ -947,11 +1010,15 @@ abstract class gradingform_instance {
      */
     public function submit_and_get_grade($elementvalue, $itemid) {
         $elementvalue['itemid'] = $itemid;
+        if ($this->is_empty_form($elementvalue)) {
+            $this->clear_attempt($elementvalue);
+            $this->make_active();
+            return -1;
+        }
         $this->update($elementvalue);
         $this->make_active();
         return $this->get_grade();
     }
-
 
     /**
      * Returns html for form element of type 'grading'. If there is a form input element

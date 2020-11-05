@@ -14,7 +14,6 @@ Y.extend(DRAGRESOURCE, M.core.dragdrop, {
         this.groups = ['resource'];
         this.samenodeclass = CSS.ACTIVITY;
         this.parentnodeclass = CSS.SECTION;
-        this.resourcedraghandle = this.get_drag_handle(M.util.get_string('movecoursemodule', 'moodle'), CSS.EDITINGMOVE, CSS.ICONCLASS, true);
 
         this.samenodelabel = {
             identifier: 'afterresource',
@@ -92,10 +91,24 @@ Y.extend(DRAGRESOURCE, M.core.dragdrop, {
      */
     setup_for_resource: function(baseselector) {
         Y.Node.all(baseselector).each(function(resourcesnode) {
+            var draggroups = resourcesnode.getData('draggroups');
+            if (!draggroups) {
+                // This Drop Node has not been set up. Configure it now.
+                resourcesnode.setAttribute('data-draggroups', this.groups.join(' '));
+                // Define empty ul as droptarget, so that item could be moved to empty list
+                new Y.DD.Drop({
+                    node: resourcesnode,
+                    groups: this.groups,
+                    padding: '20 0 20 0'
+                });
+            }
+
             // Replace move icons
             var move = resourcesnode.one('a.' + CSS.EDITINGMOVE);
             if (move) {
-                move.replace(this.resourcedraghandle.cloneNode(true));
+                var sr = move.getData('sectionreturn');
+                move.replace(this.get_drag_handle(M.util.get_string('movecoursemodule', 'moodle'),
+                             CSS.EDITINGMOVE, CSS.ICONCLASS, true).setAttribute('data-sectionreturn', sr));
             }
         }, this);
     },
@@ -103,6 +116,11 @@ Y.extend(DRAGRESOURCE, M.core.dragdrop, {
     drag_start: function(e) {
         // Get our drag object
         var drag = e.target;
+        if (drag.get('dragNode') === drag.get('node')) {
+            // We do not want to modify the contents of the real node.
+            // They will be the same during a keyboard drag and drop.
+            return;
+        }
         drag.get('dragNode').setContent(drag.get('node').get('innerHTML'));
         drag.get('dragNode').all('img.iconsmall').setStyle('vertical-align', 'baseline');
     },
@@ -172,7 +190,7 @@ Y.extend(DRAGRESOURCE, M.core.dragdrop, {
                     // TODO: revert nodes location
                 }
             },
-            context:this
+            context: this
         });
     }
 }, {

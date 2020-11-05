@@ -16,6 +16,8 @@
 
 /**
  * Legacy log reader.
+ * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+ * @todo  MDL-52805 This is to be removed in Moodle 4.0
  *
  * @package    logstore_legacy
  * @copyright  2013 Petr Skoda {@link http://skodak.org}
@@ -26,62 +28,168 @@ namespace logstore_legacy\log;
 
 defined('MOODLE_INTERNAL') || die();
 
-class store implements \tool_log\log\store, \core\log\sql_select_reader {
+class store implements \tool_log\log\store, \core\log\sql_reader {
     use \tool_log\helper\store,
         \tool_log\helper\reader;
 
+    /**
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo  MDL-52805 This is to be removed in Moodle 4.0
+     *
+     * @param \tool_log\log\manager $manager
+     */
     public function __construct(\tool_log\log\manager $manager) {
         $this->helper_setup($manager);
     }
 
     /** @var array list of db fields which needs to be replaced for legacy log query */
-    protected $standardtolegacyfields = array(
+    protected static $standardtolegacyfields = array(
         'timecreated'       => 'time',
         'courseid'          => 'course',
         'contextinstanceid' => 'cmid',
-        'origin'            => 'ip'
+        'origin'            => 'ip',
+        'anonymous'         => 0,
     );
 
-    public function get_events_select($selectwhere, array $params, $sort, $limitfrom, $limitnum) {
-        global $DB;
+    /** @var string Regex to replace the crud params */
+    const CRUD_REGEX = "/(crud).*?(<>|=|!=).*?'(.*?)'/s";
+
+    /**
+     * This method contains mapping required for Moodle core to make legacy store compatible with other sql_reader based
+     * queries.
+     *
+     * @param string $selectwhere Select statment
+     * @param array $params params for the sql
+     * @param string $sort sort fields
+     *
+     * @return array returns an array containing the sql predicate, an array of params and sorting parameter.
+     */
+    protected static function replace_sql_legacy($selectwhere, array $params, $sort = '') {
+        // Following mapping is done to make can_delete_course() compatible with legacy store.
+        if ($selectwhere == "userid = :userid AND courseid = :courseid AND eventname = :eventname AND timecreated > :since" and
+                empty($sort)) {
+            $replace = "module = 'course' AND action = 'new' AND userid = :userid AND url = :url AND time > :since";
+            $params += array('url' => "view.php?id={$params['courseid']}");
+            return array($replace, $params, $sort);
+        }
 
         // Replace db field names to make it compatible with legacy log.
-        foreach ($this->standardtolegacyfields as $from => $to) {
+        foreach (self::$standardtolegacyfields as $from => $to) {
             $selectwhere = str_replace($from, $to, $selectwhere);
-            $sort = str_replace($from, $to, $sort);
+            if (!empty($sort)) {
+                $sort = str_replace($from, $to, $sort);
+            }
             if (isset($params[$from])) {
                 $params[$to] = $params[$from];
                 unset($params[$from]);
             }
         }
 
-        $events = array();
+        // Replace crud fields.
+        $selectwhere = preg_replace_callback("/(crud).*?(<>|=|!=).*?'(.*?)'/s", 'self::replace_crud', $selectwhere);
+
+        return array($selectwhere, $params, $sort);
+    }
+
+    /**
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 4.0
+     *
+     * @param  string $selectwhere
+     * @param  array  $params
+     * @param  string $sort
+     * @param  int    $limitfrom
+     * @param  int    $limitnum
+     * @return array
+     */
+    public function get_events_select($selectwhere, array $params, $sort, $limitfrom, $limitnum) {
+        global $DB;
+
+        $sort = self::tweak_sort_by_id($sort);
+
+        // Replace the query with hardcoded mappings required for core.
+        list($selectwhere, $params, $sort) = self::replace_sql_legacy($selectwhere, $params, $sort);
+
         $records = array();
 
         try {
-            $records = $DB->get_records_select('log', $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
+            // A custom report + on the fly SQL rewriting = a possible exception.
+            $records = $DB->get_recordset_select('log', $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
         } catch (\moodle_exception $ex) {
             debugging("error converting legacy event data " . $ex->getMessage() . $ex->debuginfo, DEBUG_DEVELOPER);
+            return array();
         }
 
+        $events = array();
+
         foreach ($records as $data) {
-            $events[$data->id] = \logstore_legacy\event\legacy_logged::restore_legacy($data);
+            $events[$data->id] = $this->get_log_event($data);
         }
+
+        $records->close();
 
         return $events;
     }
 
+    /**
+     * Fetch records using given criteria returning a Traversable object.
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 4.0
+     *
+     * Note that the traversable object contains a moodle_recordset, so
+     * remember that is important that you call close() once you finish
+     * using it.
+     *
+     * @param string $selectwhere
+     * @param array $params
+     * @param string $sort
+     * @param int $limitfrom
+     * @param int $limitnum
+     * @return \Traversable|\core\event\base[]
+     */
+    public function get_events_select_iterator($selectwhere, array $params, $sort, $limitfrom, $limitnum) {
+        global $DB;
+
+        $sort = self::tweak_sort_by_id($sort);
+
+        // Replace the query with hardcoded mappings required for core.
+        list($selectwhere, $params, $sort) = self::replace_sql_legacy($selectwhere, $params, $sort);
+
+        try {
+            $recordset = $DB->get_recordset_select('log', $selectwhere, $params, $sort, '*', $limitfrom, $limitnum);
+        } catch (\moodle_exception $ex) {
+            debugging("error converting legacy event data " . $ex->getMessage() . $ex->debuginfo, DEBUG_DEVELOPER);
+            return new \EmptyIterator;
+        }
+
+        return new \core\dml\recordset_walk($recordset, array($this, 'get_log_event'));
+    }
+
+    /**
+     * Returns an event from the log data.
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 4.0
+     *
+     * @param stdClass $data Log data
+     * @return \core\event\base
+     */
+    public function get_log_event($data) {
+        return \logstore_legacy\event\legacy_logged::restore_legacy($data);
+    }
+
+    /**
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 4.0
+     *
+     * @param  string $selectwhere
+     * @param  array  $params
+     * @return int
+     */
     public function get_events_select_count($selectwhere, array $params) {
         global $DB;
 
-        // Replace db field names to make it compatible with legacy log.
-        foreach ($this->standardtolegacyfields as $from => $to) {
-            $selectwhere = str_replace($from, $to, $selectwhere);
-            if (isset($params[$from])) {
-                $params[$to] = $params[$from];
-                unset($params[$from]);
-            }
-        }
+        // Replace the query with hardcoded mappings required for core.
+        list($selectwhere, $params) = self::replace_sql_legacy($selectwhere, $params);
 
         try {
             return $DB->count_records_select('log', $selectwhere, $params);
@@ -91,19 +199,10 @@ class store implements \tool_log\log\store, \core\log\sql_select_reader {
         }
     }
 
-    public function cron() {
-        global $CFG, $DB;
-
-        // Delete old logs to save space (this might need a timer to slow it down...).
-        if (!empty($CFG->loglifetime)) { // Value in days.
-            $loglifetime = time(0) - ($CFG->loglifetime * 3600 * 24);
-            $DB->delete_records_select("log", "time < ?", array($loglifetime));
-            mtrace(" Deleted old log records");
-        }
-    }
-
     /**
      * Are the new events appearing in the reader?
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 4.0
      *
      * @return bool true means new log events are being added, false means no new data will be added
      */
@@ -111,11 +210,17 @@ class store implements \tool_log\log\store, \core\log\sql_select_reader {
         return (bool)$this->get_config('loglegacy', true);
     }
 
+    /**
+     * @deprecated since Moodle 3.6 MDL-52953 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 4.0
+     */
     public function dispose() {
     }
 
     /**
      * Legacy add_to_log() code.
+     * @deprecated since Moodle 3.1 MDL-45104 - Please use supported log stores such as "standard" or "external" instead.
+     * @todo MDL-52805 This will be removed in Moodle 3.3
      *
      * @param    int $courseid The course id
      * @param    string $module The module name  e.g. forum, journal, resource, course, user etc
@@ -124,8 +229,10 @@ class store implements \tool_log\log\store, \core\log\sql_select_reader {
      * @param    string $info Additional description information
      * @param    int $cm The course_module->id if there is one
      * @param    int|\stdClass $user If log regards $user other than $USER
+     * @param    string $ip Override the IP, should only be used for restore.
+     * @param    int $time Override the log time, should only be used for restore.
      */
-    public function legacy_add_to_log($courseid, $module, $action, $url, $info, $cm, $user) {
+    public function legacy_add_to_log($courseid, $module, $action, $url, $info, $cm, $user, $ip = null, $time = null) {
         // Note that this function intentionally does not follow the normal Moodle DB access idioms.
         // This is for a good reason: it is the most frequently used DB update function,
         // so it has been optimised for speed.
@@ -153,9 +260,9 @@ class store implements \tool_log\log\store, \core\log\sql_select_reader {
             }
         }
 
-        $remoteaddr = getremoteaddr();
+        $remoteaddr = (is_null($ip)) ? getremoteaddr() : $ip;
 
-        $timenow = time();
+        $timenow = (is_null($time)) ? time() : $time;
         if (!empty($url)) { // Could break doing html_entity_decode on an empty var.
             $url = html_entity_decode($url, ENT_QUOTES, 'UTF-8');
         } else {
@@ -166,6 +273,11 @@ class store implements \tool_log\log\store, \core\log\sql_select_reader {
         // database so that it doesn't cause a DB error. Log a warning so that
         // developers can avoid doing things which are likely to cause this on a
         // routine basis.
+        if (\core_text::strlen($action) > 40) {
+            $action = \core_text::substr($action, 0, 37) . '...';
+            debugging('Warning: logged very long action', DEBUG_DEVELOPER);
+        }
+
         if (!empty($info) && \core_text::strlen($info) > 255) {
             $info = \core_text::substr($info, 0, 252) . '...';
             debugging('Warning: logged very long info', DEBUG_DEVELOPER);
@@ -208,5 +320,82 @@ class store implements \tool_log\log\store, \core\log\sql_select_reader {
                 }
             }
         }
+    }
+
+    /**
+     * Generate a replace string for crud related sql conditions. This function is called as callback to preg_replace_callback()
+     * on the actual sql.
+     *
+     * @param array $match matched string for the passed pattern
+     *
+     * @return string The sql string to use instead of original
+     */
+    protected static function replace_crud($match) {
+        $return = '';
+        unset($match[0]); // The first entry is the whole string.
+        foreach ($match as $m) {
+            // We hard code LIKE here because we are not worried about case sensitivity and want this to be fast.
+            switch ($m) {
+                case 'crud' :
+                    $replace = 'action';
+                    break;
+                case 'c' :
+                    switch ($match[2]) {
+                        case '=' :
+                            $replace = " LIKE '%add%'";
+                            break;
+                        case '!=' :
+                        case '<>' :
+                            $replace = " NOT LIKE '%add%'";
+                            break;
+                        default:
+                            $replace = '';
+                    }
+                    break;
+                case 'r' :
+                    switch ($match[2]) {
+                        case '=' :
+                            $replace = " LIKE '%view%' OR action LIKE '%report%'";
+                            break;
+                        case '!=' :
+                        case '<>' :
+                            $replace = " NOT LIKE '%view%' AND action NOT LIKE '%report%'";
+                            break;
+                        default:
+                            $replace = '';
+                    }
+                    break;
+                case 'u' :
+                    switch ($match[2]) {
+                        case '=' :
+                            $replace = " LIKE '%update%'";
+                            break;
+                        case '!=' :
+                        case '<>' :
+                            $replace = " NOT LIKE '%update%'";
+                            break;
+                        default:
+                            $replace = '';
+                    }
+                    break;
+                case 'd' :
+                    switch ($match[2]) {
+                        case '=' :
+                            $replace = " LIKE '%delete%'";
+                            break;
+                        case '!=' :
+                        case '<>' :
+                            $replace = " NOT LIKE '%delete%'";
+                            break;
+                        default:
+                            $replace = '';
+                    }
+                    break;
+                default :
+                    $replace = '';
+            }
+            $return .= $replace;
+        }
+        return $return;
     }
 }

@@ -28,9 +28,6 @@
 
 require_once(__DIR__ . '/../../../lib/behat/behat_base.php');
 
-use Behat\Behat\Context\Step\Given as Given;
-use Behat\Behat\Context\Step\When as When;
-
 /**
  * Log in log out steps definitions.
  *
@@ -45,48 +42,30 @@ class behat_auth extends behat_base {
      * Logs in the user. There should exist a user with the same value as username and password.
      *
      * @Given /^I log in as "(?P<username_string>(?:[^"]|\\")*)"$/
+     * @param string $username the user to log in as.
+     * @param moodle_url|null $wantsurl optional, URL to go to after logging in.
      */
-    public function i_log_in_as($username) {
-
-        // Running this step using the API rather than a chained step because
-        // we need to see if the 'Log in' link is available or we need to click
-        // the dropdown to expand the navigation bar before.
-        $this->getSession()->visit($this->locate_path('/'));
-
-        // Generic steps (we will prefix them later expanding the navigation dropdown if necessary).
-        $steps = array(
-            new Given('I follow "' . get_string('login') . '"'),
-            new Given('I set the field "' . get_string('username') . '" to "' . $this->escape($username) . '"'),
-            new Given('I set the field "' . get_string('password') . '" to "'. $this->escape($username) . '"'),
-            new Given('I press "' . get_string('login') . '"')
-        );
-
-        // If Javascript is disabled we have enough with these steps.
-        if (!$this->running_javascript()) {
-            return $steps;
+    public function i_log_in_as(string $username, moodle_url $wantsurl = null) {
+        // In the mobile app the required tasks are different (does not support $wantsurl).
+        if ($this->is_in_app()) {
+            $this->execute('behat_app::login', [$username]);
+            return;
         }
 
-        // Wait for the homepage to be ready.
-        $this->getSession()->wait(self::TIMEOUT * 1000, self::PAGE_READY_JS);
-
-        // Checking if we need to click the navbar button to show the navigation menu, it
-        // is hidden by default when using clean theme and a medium or small size screen size.
-
-        // The DOM and the JS should be all ready and loaded. Running without spinning
-        // as this is a widely used step and we can not spend time here trying to see
-        // a DOM node that is not always there (at the moment clean is not even the
-        // default theme...).
-        $navbuttonjs = "return (
-            Y.one('.btn-navbar') &&
-            Y.one('.btn-navbar').getComputedStyle('display') !== 'none'
-        )";
-
-        // Adding an extra click we need to show the 'Log in' link.
-        if ($this->getSession()->getDriver()->evaluateScript($navbuttonjs)) {
-            array_unshift($steps, new Given('I click on ".btn-navbar" "css_element"'));
+        $loginurl = new moodle_url('/login/index.php');
+        if ($wantsurl !== null) {
+            $loginurl->param('wantsurl', $wantsurl->out_as_local_url());
         }
 
-        return $steps;
+        // Visit login page.
+        $this->execute('behat_general::i_visit', [$loginurl]);
+
+        // Enter username and password.
+        $this->execute('behat_forms::i_set_the_field_to', array('Username', $this->escape($username)));
+        $this->execute('behat_forms::i_set_the_field_to', array('Password', $this->escape($username)));
+
+        // Press log in button, no need to check for exceptions as it will checked after this step execution.
+        $this->execute('behat_forms::press_button', get_string('login'));
     }
 
     /**
@@ -95,7 +74,11 @@ class behat_auth extends behat_base {
      * @Given /^I log out$/
      */
     public function i_log_out() {
-        return new When('I follow "' . get_string('logout') . '"');
-    }
 
+        // Wait for page to be loaded.
+        $this->wait_for_pending_js();
+
+        // Click on logout link in footer, as it's much faster.
+        $this->execute('behat_general::i_click_on_in_the', array(get_string('logout'), 'link', '#page-footer', "css_element"));
+    }
 }

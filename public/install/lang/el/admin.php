@@ -30,5 +30,16 @@
 
 defined('MOODLE_INTERNAL') || die();
 
-$string['environmentrequireinstall'] = 'απαιτείται να εγκατασταθεί/ ενεργοποιηθεί';
+$string['clianswerno'] = 'ο';
+$string['cliansweryes'] = 'ν';
+$string['cliincorrectvalueerror'] = 'Σφάλμα, λανθασμένη τιμή «{$a->value}» για το «{$a->option}»';
+$string['cliincorrectvalueretry'] = 'Λανθασμένη τιμή. Παρακαλούμε προσπαθήστε ξανά.';
+$string['clitypevalue'] = 'πληκτρολογήστε μια τιμή';
+$string['clitypevaluedefault'] = 'πληκτρολογήστε μια τιμή· πατήστε Enter για να χρησιμοποιήσετε την προεπιλεγμένη τιμή ({$a})';
+$string['cliunknowoption'] = 'Μη αναγνωρίσιμες επιλογές:
+ {$a}<br />
+Παρακαλούμε χρησιμοποιήστε την επιλογή --help (βοήθεια)';
+$string['cliyesnoprompt'] = 'πατήστε y (σημαίνει yes=ναι) ή πατήστε n (σημαίνει no=όχι)';
+$string['environmentrequireinstall'] = 'απαιτείται να εγκατασταθεί και να ενεργοποιηθεί';
 $string['environmentrequireversion'] = 'απαιτείται η έκδοση {$a->needed} ενώ εσείς έχετε την {$a->current}';
+$string['upgradekeyset'] = 'Κλειδί αναβάθμισης (αφήστε κενό για να μην το ορίσετε)';

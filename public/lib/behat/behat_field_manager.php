@@ -26,7 +26,9 @@
 // NOTE: no MOODLE_INTERNAL test here, this file may be required by behat before including /config.php.
 
 use Behat\Mink\Session as Session,
-    Behat\Mink\Element\NodeElement as NodeElement;
+    Behat\Mink\Element\NodeElement as NodeElement,
+    Behat\Mink\Exception\ElementNotFoundException as ElementNotFoundException,
+    Behat\MinkExtension\Context\RawMinkContext as RawMinkContext;
 
 /**
  * Helper to interact with form fields.
@@ -37,6 +39,24 @@ use Behat\Mink\Session as Session,
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 class behat_field_manager {
+
+    /**
+     * Gets an instance of the form field from it's label
+     *
+     * @param string $label
+     * @param RawMinkContext $context
+     * @return behat_form_field
+     */
+    public static function get_form_field_from_label($label, RawMinkContext $context) {
+
+        // There are moodle form elements that are not directly related with
+        // a basic HTML form field, we should also take care of them.
+        // The DOM node.
+        $fieldnode = $context->find_field($label);
+
+        // The behat field manager.
+        return self::get_form_field($fieldnode, $context->getSession());
+    }
 
     /**
      * Gets an instance of the form field.
@@ -55,7 +75,12 @@ class behat_field_manager {
 
         // Get the field type if is part of a moodleform.
         if (self::is_moodleform_field($fieldnode)) {
-            $type = self::get_field_node_type($fieldnode, $session);
+            // This might go out of scope, finding element beyond the dom and fail. So fallback to guessing type.
+            try {
+                $type = self::get_field_node_type($fieldnode, $session);
+            } catch (WebDriver\Exception\InvalidSelector $e) {
+                $type = 'field';
+            }
         }
 
         // If is not a moodleforms field use the base field type.
@@ -118,7 +143,7 @@ class behat_field_manager {
         if ($tagname == 'textarea') {
 
             // If there is an iframe with $id + _ifr there a TinyMCE editor loaded.
-            $xpath = '//iframe[@id="' . $fieldnode->getAttribute('id') . '_ifr"]';
+            $xpath = '//div[@id="' . $fieldnode->getAttribute('id') . 'editable"]';
             if ($session->getPage()->find('xpath', $xpath)) {
                 return 'editor';
             }
@@ -168,7 +193,6 @@ class behat_field_manager {
 
         // We already waited when getting the NodeElement and we don't want an exception if it's not part of a moodleform.
         $parentformfound = $fieldnode->find('xpath',
-            "/ancestor::fieldset" .
             "/ancestor::form[contains(concat(' ', normalize-space(@class), ' '), ' mform ')]"
         );
 
@@ -187,9 +211,36 @@ class behat_field_manager {
      */
     protected static function get_field_node_type(NodeElement $fieldnode, Session $session) {
 
-        // We look for a parent node with 'felement' class.
-        if ($class = $fieldnode->getParent()->getAttribute('class')) {
+        // Special handling for availability field which requires custom JavaScript.
+        if ($fieldnode->getAttribute('name') === 'availabilityconditionsjson') {
+            return 'availability';
+        }
 
+        if ($fieldnode->getTagName() == 'html') {
+            return false;
+        }
+
+        // If the type is explictly set on the element pointed to by the label - use it.
+        $fieldtype = $fieldnode->getAttribute('data-fieldtype');
+        if ($fieldtype) {
+            return self::normalise_fieldtype($fieldtype);
+        }
+
+        if (!empty($fieldnode->find('xpath', '/ancestor::*[@data-passwordunmaskid]'))) {
+            return 'passwordunmask';
+        }
+
+        // Fetch the parentnode only once.
+        $parentnode = $fieldnode->getParent();
+
+        // Check the parent fieldtype before we check classes.
+        $fieldtype = $parentnode->getAttribute('data-fieldtype');
+        if ($fieldtype) {
+            return self::normalise_fieldtype($fieldtype);
+        }
+
+        // We look for a parent node with 'felement' class.
+        if ($class = $parentnode->getAttribute('class')) {
             if (strstr($class, 'felement') != false) {
                 // Remove 'felement f' from class value.
                 return substr($class, 10);
@@ -201,7 +252,21 @@ class behat_field_manager {
             }
         }
 
-        return self::get_field_node_type($fieldnode->getParent(), $session);
+        return self::get_field_node_type($parentnode, $session);
+    }
+
+    /**
+     * Normalise the field type.
+     *
+     * @param string $fieldtype
+     * @return string
+     */
+    protected static function normalise_fieldtype(string $fieldtype): string {
+        if ($fieldtype === 'tags') {
+            return 'autocomplete';
+        }
+
+        return $fieldtype;
     }
 
     /**
@@ -217,6 +282,7 @@ class behat_field_manager {
      * @todo MDL-XXXXX This will be deleted in Moodle 2.8
      * @see behat_field_manager::get_form_field()
      * @param NodeElement $fieldnode
+     * @param string $locator
      * @param Session $session The behat browser session
      * @return behat_form_field
      */
@@ -237,6 +303,7 @@ class behat_field_manager {
      * @todo MDL-XXXXX This will be deleted in Moodle 2.8
      * @see behat_field_manager::get_field_node_type()
      * @param NodeElement $fieldnode The current node.
+     * @param string $locator
      * @param Session $session The behat browser session
      * @return mixed A NodeElement if we continue looking for the element type and String or false when we are done.
      */
@@ -246,5 +313,4 @@ class behat_field_manager {
 
         return self::get_field_node_type($fieldnode, $session);
     }
-
 }

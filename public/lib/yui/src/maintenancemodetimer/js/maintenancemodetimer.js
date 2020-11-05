@@ -14,6 +14,7 @@ Y.extend(MAINTENANCEMODETIMER, Y.Base, {
     /**
      * Initialise timer if maintenancemode set.
      *
+     * @method initializer
      * @param config {Array} array with timeleftinsec set.
      */
     initializer: function(config) {
@@ -26,24 +27,33 @@ Y.extend(MAINTENANCEMODETIMER, Y.Base, {
 
     /**
      * Decrement time left and update display text.
+     *
+     * @method updatetimer
      */
     updatetimer: function() {
         this.timeleftinsec -= 1;
         if (this.timeleftinsec <= 0) {
-            this.maintenancenode.set('text', M.str.admin.sitemaintenance);
+            this.maintenancenode.set('text', M.util.get_string('sitemaintenance', 'admin'));
         } else {
             var a = {};
             a.sec = this.timeleftinsec % 60;
-            a.min = Math.floor(this.timeleftinsec / 60);
-            this.maintenancenode.set('text', M.util.get_string('maintenancemodeisscheduled', 'admin', a));
+            a.min = Math.floor(this.timeleftinsec / 60) % 60;
+            a.hour = Math.floor(this.timeleftinsec / 3600);
+            if (a.hour > 0) {
+                this.maintenancenode.set('text', M.util.get_string('maintenancemodeisscheduledlong', 'admin', a));
+            } else {
+                this.maintenancenode.set('text', M.util.get_string('maintenancemodeisscheduled', 'admin', a));
+            }
         }
         // Set error class to highlight the importance.
         if (this.timeleftinsec < 30) {
-            this.maintenancenode.addClass('error')
-                    .removeClass('warning');
+            this.maintenancenode.addClass('alert-error')
+                    .addClass('alert-danger')
+                    .removeClass('alert-warning');
         } else {
-            this.maintenancenode.addClass('warning')
-                    .removeClass('error');
+            this.maintenancenode.addClass('alert-warning')
+                    .removeClass('alert-error')
+                    .removeClass('alert-danger');
         }
     }
 });

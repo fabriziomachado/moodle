@@ -110,7 +110,12 @@ class database_importer {
             throw new dbtransfer_exception('importversionmismatchexception', $a);
         }
 
-        if ($this->check_schema and $errors = $this->manager->check_database_schema($this->schema)) {
+        $options = [
+            'changedcolumns' => false, // Column types may be fixed by transfer.
+            'missingindexes' => false, // No need to worry about indexes for transfering data.
+            'extraindexes' => false
+        ];
+        if ($this->check_schema and $errors = $this->manager->check_database_schema($this->schema, $options)) {
             $details = '';
             foreach ($errors as $table=>$items) {
                 $details .= '<div>'.get_string('table').' '.$table.':';

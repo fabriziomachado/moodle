@@ -40,7 +40,7 @@ class core_completionlib_testcase extends advanced_testcase {
 
         $this->resetAfterTest();
 
-        $DB = $this->getMock(get_class($DB));
+        $DB = $this->createMock(get_class($DB));
         $CFG->enablecompletion = COMPLETION_ENABLED;
         $USER = (object)array('id' =>314159);
     }
@@ -59,15 +59,7 @@ class core_completionlib_testcase extends advanced_testcase {
         // Create a course with activities.
         $this->course = $this->getDataGenerator()->create_course(array('enablecompletion' => true));
         $this->user = $this->getDataGenerator()->create_user();
-        $studentrole = $DB->get_record('role', array('shortname' => 'student'));
-        $this->assertNotEmpty($studentrole);
-
-        // Get manual enrolment plugin and enrol user.
-        require_once($CFG->dirroot.'/enrol/manual/locallib.php');
-        $manplugin = enrol_get_plugin('manual');
-        $maninstance = $DB->get_record('enrol', array('courseid' => $this->course->id, 'enrol' => 'manual'), '*', MUST_EXIST);
-        $manplugin->enrol_user($maninstance, $this->user->id, $studentrole->id);
-        $this->assertEquals(1, $DB->count_records('user_enrolments'));
+        $this->getDataGenerator()->enrol_user($this->user->id, $this->course->id);
 
         $this->module1 = $this->getDataGenerator()->create_module('forum', array('course' => $this->course->id));
         $this->module2 = $this->getDataGenerator()->create_module('forum', array('course' => $this->course->id));
@@ -84,7 +76,8 @@ class core_completionlib_testcase extends advanced_testcase {
      * @param  boolean $canonicalize
      * @param  boolean $ignoreCase
      */
-    public static function assertEquals($expected, $actual, $message = '', $delta = 0, $maxDepth = 10, $canonicalize = FALSE, $ignoreCase = FALSE) {
+    public static function assertEquals($expected, $actual, string $message = '', float $delta = 0, int $maxDepth = 10,
+                                        bool $canonicalize = false, bool $ignoreCase = false): void {
         // Nasty cheating hack: prevent random failures on timemodified field.
         if (is_object($expected) and is_object($actual)) {
             if (property_exists($expected, 'timemodified') and property_exists($actual, 'timemodified')) {
@@ -135,7 +128,11 @@ class core_completionlib_testcase extends advanced_testcase {
     public function test_update_state() {
         $this->mock_setup();
 
-        $c = $this->getMock('completion_info', array('is_enabled', 'get_data', 'internal_get_state', 'internal_set_data'), array((object)array('id'=>42)));
+        $mockbuilder = $this->getMockBuilder('completion_info');
+        $mockbuilder->setMethods(array('is_enabled', 'get_data', 'internal_get_state', 'internal_set_data',
+                                       'user_can_override_completion'));
+        $mockbuilder->setConstructorArgs(array((object)array('id' => 42)));
+        $c = $mockbuilder->getMock();
         $cm = (object)array('id'=>13, 'course'=>42);
 
         // Not enabled, should do nothing.
@@ -146,7 +143,7 @@ class core_completionlib_testcase extends advanced_testcase {
         $c->update_state($cm);
 
         // Enabled, but current state is same as possible result, do nothing.
-        $current = (object)array('completionstate'=>COMPLETION_COMPLETE);
+        $current = (object)array('completionstate' => COMPLETION_COMPLETE, 'overrideby' => null);
         $c->expects($this->at(0))
             ->method('is_enabled')
             ->with($cm)
@@ -195,14 +192,16 @@ class core_completionlib_testcase extends advanced_testcase {
         $changed = clone($current);
         $changed->timemodified = time();
         $changed->completionstate = COMPLETION_INCOMPLETE;
+        $comparewith = new phpunit_constraint_object_is_equal_with_exceptions($changed);
+        $comparewith->add_exception('timemodified', 'assertGreaterThanOrEqual');
         $c->expects($this->at(2))
             ->method('internal_set_data')
-            ->with($cm, $changed);
+            ->with($cm, $comparewith);
         $c->update_state($cm, COMPLETION_INCOMPLETE);
 
         // Auto, change state.
         $cm = (object)array('id'=>13, 'course'=>42, 'completion'=>COMPLETION_TRACKING_AUTOMATIC);
-        $current = (object)array('completionstate'=>COMPLETION_COMPLETE);
+        $current = (object)array('completionstate' => COMPLETION_COMPLETE, 'overrideby' => null);
         $c->expects($this->at(0))
             ->method('is_enabled')
             ->with($cm)
@@ -217,17 +216,124 @@ class core_completionlib_testcase extends advanced_testcase {
         $changed = clone($current);
         $changed->timemodified = time();
         $changed->completionstate = COMPLETION_COMPLETE_PASS;
+        $comparewith = new phpunit_constraint_object_is_equal_with_exceptions($changed);
+        $comparewith->add_exception('timemodified', 'assertGreaterThanOrEqual');
         $c->expects($this->at(3))
             ->method('internal_set_data')
-            ->with($cm, $changed);
+            ->with($cm, $comparewith);
         $c->update_state($cm, COMPLETION_COMPLETE_PASS);
+
+        // Manual tracking, change state by overriding it manually.
+        $cm = (object)array('id' => 13, 'course' => 42, 'completion' => COMPLETION_TRACKING_MANUAL);
+        $current = (object)array('completionstate' => COMPLETION_INCOMPLETE, 'overrideby' => null);
+        $c->expects($this->at(0))
+            ->method('is_enabled')
+            ->with($cm)
+            ->will($this->returnValue(true));
+        $c->expects($this->at(1)) // Pretend the user has the required capability for overriding completion statuses.
+            ->method('user_can_override_completion')
+            ->will($this->returnValue(true));
+        $c->expects($this->at(2))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($current));
+        $changed = clone($current);
+        $changed->timemodified = time();
+        $changed->completionstate = COMPLETION_COMPLETE;
+        $changed->overrideby = 314159;
+        $comparewith = new phpunit_constraint_object_is_equal_with_exceptions($changed);
+        $comparewith->add_exception('timemodified', 'assertGreaterThanOrEqual');
+        $c->expects($this->at(3))
+            ->method('internal_set_data')
+            ->with($cm, $comparewith);
+        $c->update_state($cm, COMPLETION_COMPLETE, 100, true);
+        // And confirm that the status can be changed back to incomplete without an override.
+        $c->update_state($cm, COMPLETION_INCOMPLETE, 100);
+        $c->expects($this->at(0))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($current));
+        $c->get_data($cm, false, 100);
+
+        // Auto, change state via override, incomplete to complete.
+        $cm = (object)array('id' => 13, 'course' => 42, 'completion' => COMPLETION_TRACKING_AUTOMATIC);
+        $current = (object)array('completionstate' => COMPLETION_INCOMPLETE, 'overrideby' => null);
+        $c->expects($this->at(0))
+            ->method('is_enabled')
+            ->with($cm)
+            ->will($this->returnValue(true));
+        $c->expects($this->at(1)) // Pretend the user has the required capability for overriding completion statuses.
+            ->method('user_can_override_completion')
+            ->will($this->returnValue(true));
+        $c->expects($this->at(2))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($current));
+        $changed = clone($current);
+        $changed->timemodified = time();
+        $changed->completionstate = COMPLETION_COMPLETE;
+        $changed->overrideby = 314159;
+        $comparewith = new phpunit_constraint_object_is_equal_with_exceptions($changed);
+        $comparewith->add_exception('timemodified', 'assertGreaterThanOrEqual');
+        $c->expects($this->at(3))
+            ->method('internal_set_data')
+            ->with($cm, $comparewith);
+        $c->update_state($cm, COMPLETION_COMPLETE, 100, true);
+        $c->expects($this->at(0))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($changed));
+        $c->get_data($cm, false, 100);
+
+        // Now confirm that the status cannot be changed back to incomplete without an override.
+        // I.e. test that automatic completion won't trigger a change back to COMPLETION_INCOMPLETE when overridden.
+        $c->update_state($cm, COMPLETION_INCOMPLETE, 100);
+        $c->expects($this->at(0))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($changed));
+        $c->get_data($cm, false, 100);
+
+        // Now confirm the status can be changed back from complete to incomplete using an override.
+        $cm = (object)array('id' => 13, 'course' => 42, 'completion' => COMPLETION_TRACKING_AUTOMATIC);
+        $current = (object)array('completionstate' => COMPLETION_COMPLETE, 'overrideby' => 2);
+        $c->expects($this->at(0))
+            ->method('is_enabled')
+            ->with($cm)
+            ->will($this->returnValue(true));
+        $c->expects($this->at(1)) // Pretend the user has the required capability for overriding completion statuses.
+        ->method('user_can_override_completion')
+            ->will($this->returnValue(true));
+        $c->expects($this->at(2))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($current));
+        $changed = clone($current);
+        $changed->timemodified = time();
+        $changed->completionstate = COMPLETION_INCOMPLETE;
+        $changed->overrideby = 314159;
+        $comparewith = new phpunit_constraint_object_is_equal_with_exceptions($changed);
+        $comparewith->add_exception('timemodified', 'assertGreaterThanOrEqual');
+        $c->expects($this->at(3))
+            ->method('internal_set_data')
+            ->with($cm, $comparewith);
+        $c->update_state($cm, COMPLETION_INCOMPLETE, 100, true);
+        $c->expects($this->at(0))
+            ->method('get_data')
+            ->with($cm, false, 100)
+            ->will($this->returnValue($changed));
+        $c->get_data($cm, false, 100);
     }
 
     public function test_internal_get_state() {
         global $DB;
         $this->mock_setup();
 
-        $c = $this->getMock('completion_info', array('internal_get_grade_state'), array((object)array('id'=>42)));
+        $mockbuilder = $this->getMockBuilder('completion_info');
+        $mockbuilder->setMethods(array('internal_get_grade_state'));
+        $mockbuilder->setConstructorArgs(array((object)array('id' => 42)));
+        $c = $mockbuilder->getMock();
+
         $cm = (object)array('id'=>13, 'course'=>42, 'completiongradeitemnumber'=>null);
 
         // If view is required, but they haven't viewed it yet.
@@ -260,9 +366,10 @@ class core_completionlib_testcase extends advanced_testcase {
     public function test_set_module_viewed() {
         $this->mock_setup();
 
-        $c = $this->getMock('completion_info',
-            array('delete_all_state', 'get_tracked_users', 'update_state', 'internal_get_grade_state', 'is_enabled', 'get_data', 'internal_get_state', 'internal_set_data'),
-            array((object)array('id'=>42)));
+        $mockbuilder = $this->getMockBuilder('completion_info');
+        $mockbuilder->setMethods(array('is_enabled', 'get_data', 'internal_set_data', 'update_state'));
+        $mockbuilder->setConstructorArgs(array((object)array('id' => 42)));
+        $c = $mockbuilder->getMock();
         $cm = (object)array('id'=>13, 'course'=>42);
 
         // Not tracking completion, should do nothing.
@@ -325,7 +432,7 @@ class core_completionlib_testcase extends advanced_testcase {
     }
 
     public function test_delete_all_state() {
-        global $DB, $SESSION;
+        global $DB;
         $this->mock_setup();
 
         $course = (object)array('id'=>13);
@@ -339,30 +446,16 @@ class core_completionlib_testcase extends advanced_testcase {
             ->with('course_modules_completion', array('coursemoduleid'=>42))
             ->will($this->returnValue(true));
         $c->delete_all_state($cm);
-
-        // Build up a session to check it deletes the right bits from it
-        // (and not other bits).
-        $SESSION->completioncache = array();
-        $SESSION->completioncache[13] = array();
-        $SESSION->completioncache[13][42] = 'foo';
-        $SESSION->completioncache[13][43] = 'foo';
-        $SESSION->completioncache[14] = array();
-        $SESSION->completioncache[14][42] = 'foo';
-        $DB->expects($this->at(0))
-            ->method('delete_records')
-            ->with('course_modules_completion', array('coursemoduleid'=>42))
-            ->will($this->returnValue(true));
-        $c->delete_all_state($cm);
-        $this->assertEquals(array(13=>array(43=>'foo'), 14=>array(42=>'foo')), $SESSION->completioncache);
     }
 
     public function test_reset_all_state() {
         global $DB;
         $this->mock_setup();
 
-        $c = $this->getMock('completion_info',
-            array('delete_all_state', 'get_tracked_users', 'update_state', 'internal_get_grade_state', 'is_enabled', 'get_data', 'internal_get_state', 'internal_set_data'),
-            array((object)array('id'=>42)));
+        $mockbuilder = $this->getMockBuilder('completion_info');
+        $mockbuilder->setMethods(array('delete_all_state', 'get_tracked_users', 'update_state'));
+        $mockbuilder->setConstructorArgs(array((object)array('id' => 42)));
+        $c = $mockbuilder->getMock();
 
         $cm = (object)array('id'=>13, 'course'=>42, 'completion'=>COMPLETION_TRACKING_AUTOMATIC);
 
@@ -396,10 +489,12 @@ class core_completionlib_testcase extends advanced_testcase {
     }
 
     public function test_get_data() {
-        global $DB, $SESSION;
+        global $DB;
         $this->mock_setup();
 
-        $c = new completion_info((object)array('id'=>42));
+        $cache = cache::make('core', 'completion');
+
+        $c = new completion_info((object)array('id'=>42, 'cacherev'=>1));
         $cm = (object)array('id'=>13, 'course'=>42);
 
         // 1. Not current user, record exists.
@@ -412,18 +507,20 @@ class core_completionlib_testcase extends advanced_testcase {
             ->will($this->returnValue($sillyrecord));
         $result = $c->get_data($cm, false, 123);
         $this->assertEquals($sillyrecord, $result);
-        $this->assertFalse(isset($SESSION->completioncache));
+        $this->assertEquals(false, $cache->get('123_42')); // Not current user is not cached.
 
-        // 2. Not current user, default record, whole course (ignored).
+        // 2. Not current user, default record, whole course.
+        $cache->purge();
         $DB->expects($this->at(0))
-            ->method('get_record')
-            ->with('course_modules_completion', array('coursemoduleid'=>13, 'userid'=>123))
-            ->will($this->returnValue(false));
-        $result=$c->get_data($cm, true, 123);
+            ->method('get_records_sql')
+            ->will($this->returnValue(array()));
+        $modinfo = new stdClass();
+        $modinfo->cms = array((object)array('id'=>13));
+        $result=$c->get_data($cm, true, 123, $modinfo);
         $this->assertEquals((object)array(
-            'id'=>'0', 'coursemoduleid'=>13, 'userid'=>123, 'completionstate'=>0,
-            'viewed'=>0, 'timemodified'=>0), $result);
-        $this->assertFalse(isset($SESSION->completioncache));
+            'id' => '0', 'coursemoduleid' => 13, 'userid' => 123, 'completionstate' => 0,
+            'viewed' => 0, 'timemodified' => 0, 'overrideby' => 0), $result);
+        $this->assertEquals(false, $cache->get('123_42')); // Not current user is not cached.
 
         // 3. Current user, single record, not from cache.
         $DB->expects($this->at(0))
@@ -432,34 +529,15 @@ class core_completionlib_testcase extends advanced_testcase {
             ->will($this->returnValue($sillyrecord));
         $result = $c->get_data($cm);
         $this->assertEquals($sillyrecord, $result);
-        $this->assertEquals($sillyrecord, $SESSION->completioncache[42][13]);
-        // When checking time(), allow for second overlaps.
-        $this->assertTrue(time()-$SESSION->completioncache[42]['updated']<2);
+        $cachevalue = $cache->get('314159_42');
+        $this->assertEquals((array)$sillyrecord, $cachevalue[13]);
 
         // 4. Current user, 'whole course', but from cache.
         $result = $c->get_data($cm, true);
         $this->assertEquals($sillyrecord, $result);
 
-        // 5. Current user, single record, cache expired
-        $SESSION->completioncache[42]['updated']=37; // Quite a long time ago.
-        $now = time();
-        $SESSION->completioncache[17]['updated']=$now;
-        $SESSION->completioncache[39]['updated']=72; // Also a long time ago.
-        $DB->expects($this->at(0))
-            ->method('get_record')
-            ->with('course_modules_completion', array('coursemoduleid'=>13, 'userid'=>314159))
-            ->will($this->returnValue($sillyrecord));
-        $result = $c->get_data($cm, false);
-        $this->assertEquals($sillyrecord, $result);
-
-        // Check that updated value is right, then fudge it to make next compare work.
-        $this->assertTrue(time()-$SESSION->completioncache[42]['updated']<2);
-        $SESSION->completioncache[42]['updated']=$now;
-        // Check things got expired from cache.
-        $this->assertEquals(array(42=>array(13=>$sillyrecord, 'updated'=>$now), 17=>array('updated'=>$now)), $SESSION->completioncache);
-
-        // 6. Current user, 'whole course' and record not in cache.
-        unset($SESSION->completioncache);
+        // 5. Current user, 'whole course' and record not in cache.
+        $cache->purge();
 
         // Scenario: Completion data exists for one CMid.
         $basicrecord = (object)array('coursemoduleid'=>13);
@@ -476,15 +554,15 @@ class core_completionlib_testcase extends advanced_testcase {
         $this->assertEquals($basicrecord, $result);
 
         // Check the cache contents.
-        $this->assertTrue(time()-$SESSION->completioncache[42]['updated']<2);
-        $SESSION->completioncache[42]['updated'] = $now;
-        $this->assertEquals(array(42=>array(13=>$basicrecord, 14=>(object)array(
-            'id'=>'0', 'coursemoduleid'=>14, 'userid'=>314159, 'completionstate'=>0,
-            'viewed'=>0, 'timemodified'=>0), 'updated'=>$now)), $SESSION->completioncache);
+        $cachevalue = $cache->get('314159_42');
+        $this->assertEquals($basicrecord, (object)$cachevalue[13]);
+        $this->assertEquals(array('id' => '0', 'coursemoduleid' => 14,
+            'userid' => 314159, 'completionstate' => 0, 'viewed' => 0, 'overrideby' => 0, 'timemodified' => 0),
+            $cachevalue[14]);
     }
 
     public function test_internal_set_data() {
-        global $DB, $SESSION;
+        global $DB;
         $this->setup_data();
 
         $this->setUser($this->user);
@@ -501,14 +579,17 @@ class core_completionlib_testcase extends advanced_testcase {
         $data->completionstate = COMPLETION_COMPLETE;
         $data->timemodified = time();
         $data->viewed = COMPLETION_NOT_VIEWED;
+        $data->overrideby = null;
 
         $c->internal_set_data($cm, $data);
         $d1 = $DB->get_field('course_modules_completion', 'id', array('coursemoduleid' => $cm->id));
         $this->assertEquals($d1, $data->id);
-        $this->assertEquals(array($this->course->id => array($cm->id => $data)), $SESSION->completioncache);
+        $cache = cache::make('core', 'completion');
+        // Cache was not set for another user.
+        $this->assertEquals(array('cacherev' => $this->course->cacherev, $cm->id => $data),
+            $cache->get($data->userid . '_' . $cm->course));
 
-        // 2) Test with existing data and for different user (not cached).
-        unset($SESSION->completioncache);
+        // 2) Test with existing data and for different user.
         $forum2 = $this->getDataGenerator()->create_module('forum', array('course' => $this->course->id), $completionauto);
         $cm2 = get_coursemodule_from_instance('forum', $forum2->id);
         $newuser = $this->getDataGenerator()->create_user();
@@ -520,8 +601,13 @@ class core_completionlib_testcase extends advanced_testcase {
         $d2->completionstate = COMPLETION_COMPLETE;
         $d2->timemodified = time();
         $d2->viewed = COMPLETION_NOT_VIEWED;
+        $d2->overrideby = null;
         $c->internal_set_data($cm2, $d2);
-        $this->assertFalse(isset($SESSION->completioncache));
+        // Cache for current user returns the data.
+        $cachevalue = $cache->get($data->userid . '_' . $cm->course);
+        $this->assertEquals($data, $cachevalue[$cm->id]);
+        // Cache for another user is not filled.
+        $this->assertEquals(false, $cache->get($d2->userid . '_' . $cm2->course));
 
         // 3) Test where it THINKS the data is new (from cache) but actually
         //    in the database it has been set since.
@@ -536,6 +622,7 @@ class core_completionlib_testcase extends advanced_testcase {
         $d3->completionstate = COMPLETION_COMPLETE;
         $d3->timemodified = time();
         $d3->viewed = COMPLETION_NOT_VIEWED;
+        $d3->overrideby = null;
         $DB->insert_record('course_modules_completion', $d3);
         $c->internal_set_data($cm, $data);
     }
@@ -544,9 +631,10 @@ class core_completionlib_testcase extends advanced_testcase {
         global $DB;
         $this->mock_setup();
 
-        $c = $this->getMock('completion_info',
-            array('delete_all_state', 'get_tracked_users', 'update_state', 'internal_get_grade_state', 'is_enabled', 'get_data', 'internal_get_state', 'internal_set_data'),
-            array((object)array('id'=>42)));
+        $mockbuilder = $this->getMockBuilder('completion_info');
+        $mockbuilder->setMethods(array('get_tracked_users'));
+        $mockbuilder->setConstructorArgs(array((object)array('id' => 42)));
+        $c = $mockbuilder->getMock();
 
         // 1) Basic usage.
         $c->expects($this->at(0))
@@ -621,9 +709,10 @@ class core_completionlib_testcase extends advanced_testcase {
     public function test_inform_grade_changed() {
         $this->mock_setup();
 
-        $c = $this->getMock('completion_info',
-            array('delete_all_state', 'get_tracked_users', 'update_state', 'internal_get_grade_state', 'is_enabled', 'get_data', 'internal_get_state', 'internal_set_data'),
-            array((object)array('id'=>42)));
+        $mockbuilder = $this->getMockBuilder('completion_info');
+        $mockbuilder->setMethods(array('is_enabled', 'update_state'));
+        $mockbuilder->setConstructorArgs(array((object)array('id' => 42)));
+        $c = $mockbuilder->getMock();
 
         $cm = (object)array('course'=>42, 'id'=>13, 'completion'=>0, 'completiongradeitemnumber'=>null);
         $item = (object)array('itemnumber'=>3,  'gradepass'=>1,  'hidden'=>0);
@@ -787,6 +876,44 @@ class core_completionlib_testcase extends advanced_testcase {
     }
 
     /**
+     * Test that data is cleaned up when we delete courses that are set as completion criteria for other courses
+     *
+     * @return void
+     */
+    public function test_course_delete_prerequisite() {
+        global $DB;
+
+        $this->setup_data();
+
+        $courseprerequisite = $this->getDataGenerator()->create_course(['enablecompletion' => true]);
+
+        $criteriadata = (object) [
+            'id' => $this->course->id,
+            'criteria_course' => [$courseprerequisite->id],
+        ];
+
+        /** @var completion_criteria_course $criteria */
+        $criteria = completion_criteria::factory(['criteriatype' => COMPLETION_CRITERIA_TYPE_COURSE]);
+        $criteria->update_config($criteriadata);
+
+        // Sanity test.
+        $this->assertTrue($DB->record_exists('course_completion_criteria', [
+            'course' => $this->course->id,
+            'criteriatype' => COMPLETION_CRITERIA_TYPE_COURSE,
+            'courseinstance' => $courseprerequisite->id,
+        ]));
+
+        // Deleting the prerequisite course should remove the completion criteria.
+        delete_course($courseprerequisite, false);
+
+        $this->assertFalse($DB->record_exists('course_completion_criteria', [
+            'course' => $this->course->id,
+            'criteriatype' => COMPLETION_CRITERIA_TYPE_COURSE,
+            'courseinstance' => $courseprerequisite->id,
+        ]));
+    }
+
+    /**
      * Test course module completion update event.
      */
     public function test_course_module_completion_updated_event() {
@@ -817,7 +944,7 @@ class core_completionlib_testcase extends advanced_testcase {
         $this->assertEquals($current, $event->get_record_snapshot('course_modules_completion', $event->objectid));
         $this->assertEquals(context_module::instance($forum->cmid), $event->get_context());
         $this->assertEquals($USER->id, $event->userid);
-        $this->assertEquals($this->user->id, $event->other['relateduserid']);
+        $this->assertEquals($this->user->id, $event->relateduserid);
         $this->assertInstanceOf('moodle_url', $event->get_url());
         $this->assertEventLegacyData($current, $event);
     }
@@ -844,7 +971,7 @@ class core_completionlib_testcase extends advanced_testcase {
         $this->assertEquals($this->course->id, $event->get_record_snapshot('course_completions', $event->objectid)->course);
         $this->assertEquals($this->course->id, $event->courseid);
         $this->assertEquals($USER->id, $event->userid);
-        $this->assertEquals($this->user->id, $event->other['relateduserid']);
+        $this->assertEquals($this->user->id, $event->relateduserid);
         $this->assertEquals(context_course::instance($this->course->id), $event->get_context());
         $this->assertInstanceOf('moodle_url', $event->get_url());
         $data = $ccompletion->get_record_data();
@@ -877,6 +1004,17 @@ class core_completionlib_testcase extends advanced_testcase {
         $this->assertInstanceOf('moodle_url', $event->get_url());
         $expectedlegacylog = array($this->course->id, 'course', 'completion updated', 'completion.php?id='.$this->course->id);
         $this->assertEventLegacyLogData($expectedlegacylog, $event);
+    }
+
+    public function test_completion_can_view_data() {
+        $this->setup_data();
+
+        $student = $this->getDataGenerator()->create_user();
+        $this->getDataGenerator()->enrol_user($student->id, $this->course->id);
+
+        $this->setUser($student);
+        $this->assertTrue(completion_can_view_data($student->id, $this->course->id));
+        $this->assertFalse(completion_can_view_data($this->user->id, $this->course->id));
     }
 }
 

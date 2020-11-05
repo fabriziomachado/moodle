@@ -14,14 +14,23 @@
 // You should have received a copy of the GNU General Public License
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
+/**
+ * Course category updated event.
+ *
+ * @package    core
+ * @copyright  2014 Mark Nelson <markn@moodle.com>
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
+
 namespace core\event;
 
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Course category updated event.
+ * Course category updated event class.
  *
  * @package    core
+ * @since      Moodle 2.7
  * @copyright  2014 Mark Nelson <markn@moodle.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -49,13 +58,21 @@ class course_category_updated extends base {
     }
 
     /**
+     * Returns relevant URL.
+     *
+     * @return \moodle_url
+     */
+    public function get_url() {
+        return new \moodle_url('/course/editcategory.php', array('id' => $this->objectid));
+    }
+
+    /**
      * Returns non-localised description of what happened.
      *
      * @return string
      */
     public function get_description() {
-        return 'The course category with the id ' . $this->objectid . ' was updated by the user with the id ' .
-            $this->userid;
+        return "The user with id '$this->userid' updated the course category with id '$this->objectid'.";
     }
 
     /**
@@ -78,5 +95,10 @@ class course_category_updated extends base {
         }
 
         return array(SITEID, 'category', 'update', 'editcategory.php?id=' . $this->objectid, $this->objectid);
+    }
+
+    public static function get_objectid_mapping() {
+        // Categories are not backed up, so no need to map them on restore.
+        return array('db' => 'course_categories', 'restore' => base::NOT_MAPPED);
     }
 }

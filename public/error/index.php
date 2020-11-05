@@ -1,7 +1,6 @@
 <?php
 
     require('../config.php');
-    require_once($CFG->libdir.'/eventslib.php');
 
     // Form submitted, do not check referer (original page unknown).
     if ($form = data_submitted()) {
@@ -11,7 +10,8 @@
         }
 
         // Send the message and redirect.
-        $eventdata = new stdClass();
+        $eventdata = new \core\message\message();
+        $eventdata->courseid         = SITEID;
         $eventdata->component        = 'moodle';
         $eventdata->name             = 'errors';
         $eventdata->userfrom          = $USER;
@@ -29,7 +29,7 @@
 
     $site = get_site();
     $redirecturl = empty($_SERVER['REDIRECT_URL']) ? '' : $_SERVER['REDIRECT_URL'];
-    $httpreferer = empty($_SERVER['HTTP_REFERER']) ? '' : $_SERVER['HTTP_REFERER'];
+    $httpreferer = get_local_referer(false);
     $requesturi  = empty($_SERVER['REQUEST_URI'])  ? '' : $_SERVER['REQUEST_URI'];
 
     header("HTTP/1.0 404 Not Found");

@@ -45,8 +45,12 @@ class core_string_manager_standard implements core_string_manager {
     protected $countgetstring = 0;
     /** @var bool use disk cache */
     protected $translist;
+    /** @var array language aliases to use in the language selector */
+    protected $transaliases = [];
     /** @var cache stores list of available translations */
     protected $menucache;
+    /** @var array list of cached deprecated strings */
+    protected $cacheddeprecated;
 
     /**
      * Create new instance of string manager
@@ -54,12 +58,14 @@ class core_string_manager_standard implements core_string_manager {
      * @param string $otherroot location of downloaded lang packs - usually $CFG->dataroot/lang
      * @param string $localroot usually the same as $otherroot
      * @param array $translist limit list of visible translations
+     * @param array $transaliases aliases to use for the languages in the language selector
      */
-    public function __construct($otherroot, $localroot, $translist) {
+    public function __construct($otherroot, $localroot, $translist, $transaliases = []) {
         $this->otherroot    = $otherroot;
         $this->localroot    = $localroot;
         if ($translist) {
             $this->translist = array_combine($translist, $translist);
+            $this->transaliases = $transaliases;
         } else {
             $this->translist = array();
         }
@@ -207,6 +213,58 @@ class core_string_manager_standard implements core_string_manager {
     }
 
     /**
+     * Parses all deprecated.txt in all plugins lang locations and returns the list of deprecated strings.
+     *
+     * Static variable is used for caching, this function is only called in dev environment.
+     *
+     * @return array of deprecated strings in the same format they appear in deprecated.txt files: "identifier,component"
+     *     where component is a normalised component (i.e. "core_moodle", "mod_assign", etc.)
+     */
+    protected function load_deprecated_strings() {
+        global $CFG;
+
+        if ($this->cacheddeprecated !== null) {
+            return $this->cacheddeprecated;
+        }
+
+        $this->cacheddeprecated = array();
+        $content = '';
+        $filename = $CFG->dirroot . '/lang/en/deprecated.txt';
+        if (file_exists($filename)) {
+            $content .= file_get_contents($filename);
+        }
+        foreach (core_component::get_plugin_types() as $plugintype => $plugintypedir) {
+            foreach (core_component::get_plugin_list($plugintype) as $pluginname => $plugindir) {
+                $filename = $plugindir.'/lang/en/deprecated.txt';
+                if (file_exists($filename)) {
+                    $content .= "\n". file_get_contents($filename);
+                }
+            }
+        }
+
+        $strings = preg_split('/\s*\n\s*/', $content, -1, PREG_SPLIT_NO_EMPTY);
+        $this->cacheddeprecated = array_flip($strings);
+
+        return $this->cacheddeprecated;
+    }
+
+    /**
+     * Has string been deprecated?
+     *
+     * Usually checked only inside get_string() to display debug warnings.
+     *
+     * @param string $identifier The identifier of the string to search for
+     * @param string $component The module the string is associated with
+     * @return bool true if deprecated
+     */
+    public function string_deprecated($identifier, $component) {
+        $deprecated = $this->load_deprecated_strings();
+        list($plugintype, $pluginname) = core_component::normalize_component($component);
+        $normcomponent = $pluginname ? ($plugintype . '_' . $pluginname) : $plugintype;
+        return isset($deprecated[$identifier . ',' . $normcomponent]);
+    }
+
+    /**
      * Does the string actually exist?
      *
      * get_string() is throwing debug warnings, sometimes we do not want them
@@ -234,6 +292,8 @@ class core_string_manager_standard implements core_string_manager {
      * @return string The String !
      */
     public function get_string($identifier, $component = '', $a = null, $lang = null) {
+        global $CFG;
+
         $this->countgetstring++;
         // There are very many uses of these time formatting strings without the 'langconfig' component,
         // it would not be reasonable to expect that all of them would be converted during 2.0 migration.
@@ -279,7 +339,7 @@ class core_string_manager_standard implements core_string_manager {
             // Devs need to learn to purge all caches after any change or disable $CFG->langstringcache.
             if (!isset($string[$identifier])) {
                 // The string is still missing - should be fixed by developer.
-                if (debugging('', DEBUG_DEVELOPER)) {
+                if ($CFG->debugdeveloper) {
                     list($plugintype, $pluginname) = core_component::normalize_component($component);
                     if ($plugintype === 'core') {
                         $file = "lang/en/{$component}.php";
@@ -324,6 +384,17 @@ class core_string_manager_standard implements core_string_manager {
             }
         }
 
+        if ($CFG->debugdeveloper) {
+            // Display a debugging message if sting exists but was deprecated.
+            if ($this->string_deprecated($identifier, $component)) {
+                list($plugintype, $pluginname) = core_component::normalize_component($component);
+                $normcomponent = $pluginname ? ($plugintype . '_' . $pluginname) : $plugintype;
+                debugging("String [{$identifier},{$normcomponent}] is deprecated. ".
+                    'Either you should no longer be using that string, or the string has been incorrectly deprecated, in which case you should report this as a bug. '.
+                    'Please refer to https://docs.moodle.org/dev/String_deprecation', DEBUG_DEVELOPER);
+            }
+        }
+
         return $string;
     }
 
@@ -356,6 +427,7 @@ class core_string_manager_standard implements core_string_manager {
 
         $countries = $this->load_component_strings('core_countries', $lang);
         core_collator::asort($countries);
+
         if (!$returnall and !empty($CFG->allcountrycodes)) {
             $enabled = explode(',', $CFG->allcountrycodes);
             $return = array();
@@ -364,7 +436,10 @@ class core_string_manager_standard implements core_string_manager {
                     $return[$c] = $countries[$c];
                 }
             }
-            return $return;
+
+            if (!empty($return)) {
+                return $return;
+            }
         }
 
         return $countries;
@@ -454,16 +529,27 @@ class core_string_manager_standard implements core_string_manager {
             }
             // Return only enabled translations.
             foreach ($cachedlist as $langcode => $langname) {
-                if (isset($this->translist[$langcode])) {
-                    $languages[$langcode] = $langname;
+                if (array_key_exists($langcode, $this->translist)) {
+                    $languages[$langcode] = !empty($this->transaliases[$langcode]) ? $this->transaliases[$langcode] : $langname;
                 }
             }
-            return $languages;
+
+            // If there are no valid enabled translations, then return all languages.
+            if (!empty($languages)) {
+                return $languages;
+            } else {
+                return $cachedlist;
+            }
         }
 
         // Get all languages available in system.
         $langdirs = get_list_of_plugins('', 'en', $this->otherroot);
         $langdirs["$CFG->dirroot/lang/en"] = 'en';
+
+        // We use left to right mark to demark the shortcodes contained in LTR brackets, but we need to do
+        // this hacky thing to have the utf8 char until we go php7 minimum and can simply put \u200E in
+        // a double quoted string.
+        $lrm = json_decode('"\u200E"');
 
         // Loop through all langs and get info.
         foreach ($langdirs as $lang) {
@@ -481,7 +567,7 @@ class core_string_manager_standard implements core_string_manager {
             }
             $string = $this->load_component_strings('langconfig', $lang);
             if (!empty($string['thislanguage'])) {
-                $languages[$lang] = $string['thislanguage'].' ('. $lang .')';
+                $languages[$lang] = $string['thislanguage'].' '.$lrm.'('. $lang .')'.$lrm;
             }
         }
 
@@ -500,11 +586,16 @@ class core_string_manager_standard implements core_string_manager {
         $languages = array();
         foreach ($cachedlist as $langcode => $langname) {
             if (isset($this->translist[$langcode])) {
-                $languages[$langcode] = $langname;
+                $languages[$langcode] = !empty($this->transaliases[$langcode]) ? $this->transaliases[$langcode] : $langname;
             }
         }
 
-        return $languages;
+        // If there are no valid enabled translations, then return all languages.
+        if (!empty($languages)) {
+            return $languages;
+        } else {
+            return $cachedlist;
+        }
     }
 
     /**

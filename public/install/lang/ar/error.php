@@ -30,12 +30,24 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+$string['cannotcreatedboninstall'] = '<p>لا يمكن إنشاء قاعدة البيانات.</p>
+<p>لا وجود لقاعدة البيانات المحددة والمستخدم المُعطى ليس لديه صلاحية إنشاء قاعدة البيانات.</p>
+<p>مسؤول الموقع يجب أن يتحقق من إعدادات قاعدة البيانات.</p>';
 $string['cannotcreatelangdir'] = 'لا يمكن إنشاء مجلد اللغة';
 $string['cannotcreatetempdir'] = 'لا يمكن إنشاء المجلد المؤقت';
-$string['cannotdownloadcomponents'] = 'لم يتم تحميل العناصر';
+$string['cannotdownloadcomponents'] = 'تعذر تنزيل المُكونات';
 $string['cannotdownloadzipfile'] = 'لم يتم تحميل الملف المضغوط';
 $string['cannotfindcomponent'] = 'لم يتم العثور على المكون';
 $string['cannotsavemd5file'] = 'لم يتم حفظ ملف  md5';
 $string['cannotsavezipfile'] = 'لم يتم حفظ الملف المضغوط';
 $string['cannotunzipfile'] = 'لم يتم فك الملف المضغوط';
+$string['componentisuptodate'] = 'العنصر محدث';
+$string['dmlexceptiononinstall'] = '<p>حدث خطأ في قاعدة البيانات[{$a->errorcode}].<br />{$a->debuginfo}</p>';
+$string['downloadedfilecheckfailed'] = 'فشل التحقق من الملف الذي تم تنزيله';
+$string['invalidmd5'] = 'المتغير المُختار خاطئ - حاول مرة أخرى';
 $string['missingrequiredfield'] = 'بعض الحقول المطلوبة مفقودة';
+$string['remotedownloaderror'] = '<p>فشل تنزيل المكون إلى مُخدمك. لطفاً تحقق من إعدادات الوكيل؛ الامتداد cURL لـ PHP موصى به بشدة.</p>
+<p>عليك تنزيل الملف <a href="{$a->url}">{$a->url}</a> يدوياً، ونسخه إلى "{$a->dest}" في مُخدمك ثم القيام بفك ضغطه هناك.</p>';
+$string['wrongdestpath'] = 'مسار الهدف خاطئ';
+$string['wrongsourcebase'] = 'أساس رابط المصدر خاطئ';
+$string['wrongzipfilename'] = 'تسمية الملف المضغوط خاطئة';

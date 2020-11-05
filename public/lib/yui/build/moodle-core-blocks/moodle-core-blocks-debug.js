@@ -1,5 +1,8 @@
 YUI.add('moodle-core-blocks', function (Y, NAME) {
 
+var MANAGER;
+var BLOCKREGION;
+var DRAGBLOCK;
 /**
  * Provides drag and drop functionality for blocks.
  *
@@ -8,21 +11,22 @@ YUI.add('moodle-core-blocks', function (Y, NAME) {
 
 var AJAXURL = '/lib/ajax/blocks.php',
 CSS = {
-    BLOCK : 'block',
-    BLOCKREGION : 'block-region',
-    BLOCKADMINBLOCK : 'block_adminblock',
-    EDITINGMOVE : 'editing_move',
-    HEADER : 'header',
-    LIGHTBOX : 'lightbox',
-    REGIONCONTENT : 'region-content',
-    SKIPBLOCK : 'skip-block',
-    SKIPBLOCKTO : 'skip-block-to',
-    MYINDEX : 'page-my-index',
-    REGIONMAIN : 'region-main'
+    BLOCK: 'block',
+    BLOCKREGION: 'block-region',
+    BLOCKADMINBLOCK: 'block_adminblock',
+    EDITINGMOVE: 'editing_move',
+    HEADER: 'header',
+    LIGHTBOX: 'lightbox',
+    REGIONCONTENT: 'region-content',
+    SKIPBLOCK: 'skip-block',
+    SKIPBLOCKTO: 'skip-block-to',
+    MYINDEX: 'page-my-index',
+    REGIONMAIN: 'region-main',
+    BLOCKSMOVING: 'blocks-moving'
 };
 
 var SELECTOR = {
-    DRAGHANDLE : '.' + CSS.HEADER + ' .commands .moodle-core-dragdrop-draghandle'
+    DRAGHANDLE: '.' + CSS.HEADER + ' .commands .moodle-core-dragdrop-draghandle'
 };
 
 /**
@@ -35,21 +39,21 @@ var SELECTOR = {
  * @constructor
  * @extends M.core.dragdrop
  */
-var DRAGBLOCK = function() {
+DRAGBLOCK = function() {
     DRAGBLOCK.superclass.constructor.apply(this, arguments);
 };
 Y.extend(DRAGBLOCK, M.core.dragdrop, {
-    skipnodetop : null,
-    skipnodebottom : null,
-    dragsourceregion : null,
-    initializer : function() {
+    skipnodetop: null,
+    skipnodebottom: null,
+    dragsourceregion: null,
+    initializer: function() {
         // Set group for parent class
         this.groups = ['block'];
         this.samenodeclass = CSS.BLOCK;
         this.parentnodeclass = CSS.REGIONCONTENT;
 
-        // Add relevant classes and ID to 'content' block region on My Home page.
-        var myhomecontent = Y.Node.all('body#'+CSS.MYINDEX+' #'+CSS.REGIONMAIN+' > .'+CSS.REGIONCONTENT);
+        // Add relevant classes and ID to 'content' block region on Dashboard page.
+        var myhomecontent = Y.Node.all('body#' + CSS.MYINDEX + ' #' + CSS.REGIONMAIN + ' > .' + CSS.REGIONCONTENT);
         if (myhomecontent.size() > 0) {
             var contentregion = myhomecontent.item(0);
             contentregion.addClass(CSS.BLOCKREGION);
@@ -59,7 +63,7 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
 
         // Initialise blocks dragging
         // Find all block regions on the page
-        var blockregionlist = Y.Node.all('div.'+CSS.BLOCKREGION);
+        var blockregionlist = Y.Node.all('div.' + CSS.BLOCKREGION);
 
         if (blockregionlist.size() === 0) {
             return false;
@@ -78,12 +82,12 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
 
             if (pre.size() === 0 && post.size() === 1) {
                 // pre block is missing, instert it before post
-                blockregion.setAttrs({id : 'region-pre'});
+                blockregion.setAttrs({id: 'region-pre'});
                 post.item(0).insert(blockregion, 'before');
                 blockregionlist.unshift(blockregion);
             } else if (post.size() === 0 && pre.size() === 1) {
                 // post block is missing, instert it after pre
-                blockregion.setAttrs({id : 'region-post'});
+                blockregion.setAttrs({id: 'region-post'});
                 pre.item(0).insert(blockregion, 'after');
                 blockregionlist.push(blockregion);
             }
@@ -95,7 +99,7 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
             // The region-post (the right one)
             // is very narrow, so add extra padding on the left to drop block on it.
             new Y.DD.Drop({
-                node: blockregionnode.one('div.'+CSS.REGIONCONTENT),
+                node: blockregionnode.one('div.' + CSS.REGIONCONTENT),
                 groups: this.groups,
                 padding: '40 240 40 240'
             });
@@ -103,7 +107,7 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
             // Make each div element in the list of blocks draggable
             var del = new Y.DD.Delegate({
                 container: blockregionnode,
-                nodes: '.'+CSS.BLOCK,
+                nodes: '.' + CSS.BLOCK,
                 target: true,
                 handles: [SELECTOR.DRAGHANDLE],
                 invalid: '.block-hider-hide, .block-hider-show, .moveto',
@@ -115,9 +119,9 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
             });
             del.dd.plug(Y.Plugin.DDWinScroll);
 
-            var blocklist = blockregionnode.all('.'+CSS.BLOCK);
+            var blocklist = blockregionnode.all('.' + CSS.BLOCK);
             blocklist.each(function(blocknode) {
-                var move = blocknode.one('a.'+CSS.EDITINGMOVE);
+                var move = blocknode.one('a.' + CSS.EDITINGMOVE);
                 if (move) {
                     move.replace(this.get_drag_handle(move.getAttribute('title'), '', 'iconsmall', true));
                     blocknode.one(SELECTOR.DRAGHANDLE).setStyle('cursor', 'move');
@@ -126,15 +130,15 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
         }, this);
     },
 
-    get_block_id : function(node) {
+    get_block_id: function(node) {
         return Number(node.get('id').replace(/inst/i, ''));
     },
 
-    get_block_region : function(node) {
-        var region = node.ancestor('div.'+CSS.BLOCKREGION).get('id').replace(/region-/i, '');
+    get_block_region: function(node) {
+        var region = node.ancestor('div.' + CSS.BLOCKREGION).get('id').replace(/region-/i, '');
         if (Y.Array.indexOf(this.get('regions'), region) === -1) {
             // Must be standard side-X
-            if (right_to_left()) {
+            if (window.right_to_left()) {
                 if (region === 'post') {
                     region = 'pre';
                 } else if (region === 'pre') {
@@ -147,17 +151,17 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
         return region;
     },
 
-    get_region_id : function(node) {
+    get_region_id: function(node) {
         return node.get('id').replace(/region-/i, '');
     },
 
-    drag_start : function(e) {
+    drag_start: function(e) {
         // Get our drag object
         var drag = e.target;
 
         // Store the parent node of original drag node (block)
         // we will need it later for show/hide empty regions
-        this.dragsourceregion = drag.get('node').ancestor('div.'+CSS.BLOCKREGION);
+        this.dragsourceregion = drag.get('node').ancestor('div.' + CSS.BLOCKREGION);
 
         // Determine skipnodes and store them
         if (drag.get('node').previous() && drag.get('node').previous().hasClass(CSS.SKIPBLOCK)) {
@@ -166,16 +170,21 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
         if (drag.get('node').next() && drag.get('node').next().hasClass(CSS.SKIPBLOCKTO)) {
             this.skipnodebottom = drag.get('node').next();
         }
+
+        // Add the blocks-moving class so that the theme can respond if need be.
+        Y.one('body').addClass(CSS.BLOCKSMOVING);
     },
 
-    drop_over : function(e) {
+    drop_over: function(e) {
         // Get a reference to our drag and drop nodes
         var drag = e.drag.get('node');
         var drop = e.drop.get('node');
 
         // We need to fix the case when parent drop over event has determined
         // 'goingup' and appended the drag node after admin-block.
-        if (drop.hasClass(this.parentnodeclass) && drop.one('.'+CSS.BLOCKADMINBLOCK) && drop.one('.'+CSS.BLOCKADMINBLOCK).next('.'+CSS.BLOCK)) {
+        if (drop.hasClass(this.parentnodeclass) &&
+                drop.one('.' + CSS.BLOCKADMINBLOCK) &&
+                drop.one('.' + CSS.BLOCKADMINBLOCK).next('.' + CSS.BLOCK)) {
             drop.prepend(drag);
         }
 
@@ -196,35 +205,38 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
         var documentbody = Y.one('body');
         // Moving block towards hidden region-content, display it
         var regionname = this.get_region_id(this.dragsourceregion);
-        if (documentbody.hasClass('side-'+regionname+'-only')) {
-            documentbody.removeClass('side-'+regionname+'-only');
+        if (documentbody.hasClass('side-' + regionname + '-only')) {
+            documentbody.removeClass('side-' + regionname + '-only');
         }
 
         // Moving from empty region-content towards the opposite one,
         // hide empty one (only for region-pre, region-post areas at the moment).
-        regionname = this.get_region_id(drop.ancestor('div.'+CSS.BLOCKREGION));
-        if (this.dragsourceregion.all('.'+CSS.BLOCK).size() === 0 && this.dragsourceregion.get('id').match(/(region-pre|region-post)/i)) {
-            if (!documentbody.hasClass('side-'+regionname+'-only')) {
-                documentbody.addClass('side-'+regionname+'-only');
+        regionname = this.get_region_id(drop.ancestor('div.' + CSS.BLOCKREGION));
+        if (this.dragsourceregion.all('.' + CSS.BLOCK).size() === 0 &&
+                this.dragsourceregion.get('id').match(/(region-pre|region-post)/i)) {
+            if (!documentbody.hasClass('side-' + regionname + '-only')) {
+                documentbody.addClass('side-' + regionname + '-only');
             }
         }
     },
 
-    drop_end : function() {
+    drag_end: function() {
         // clear variables
         this.skipnodetop = null;
         this.skipnodebottom = null;
         this.dragsourceregion = null;
+        // Remove the blocks moving class once the drag-drop is over.
+        Y.one('body').removeClass(CSS.BLOCKSMOVING);
     },
 
-    drag_dropmiss : function(e) {
+    drag_dropmiss: function(e) {
         // Missed the target, but we assume the user intended to drop it
         // on the last last ghost node location, e.drag and e.drop should be
         // prepared by global_drag_dropmiss parent so simulate drop_hit(e).
         this.drop_hit(e);
     },
 
-    drop_hit : function(e) {
+    drop_hit: function(e) {
         var drag = e.drag;
         // Get a reference to our drag node
         var dragnode = drag.get('node');
@@ -248,31 +260,31 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
 
         // Prepare request parameters
         var params = {
-            sesskey : M.cfg.sesskey,
-            courseid : this.get('courseid'),
-            pagelayout : this.get('pagelayout'),
-            pagetype : this.get('pagetype'),
-            subpage : this.get('subpage'),
-            contextid : this.get('contextid'),
-            action : 'move',
-            bui_moveid : this.get_block_id(dragnode),
-            bui_newregion : this.get_block_region(dropnode)
+            sesskey: M.cfg.sesskey,
+            courseid: this.get('courseid'),
+            pagelayout: this.get('pagelayout'),
+            pagetype: this.get('pagetype'),
+            subpage: this.get('subpage'),
+            contextid: this.get('contextid'),
+            action: 'move',
+            bui_moveid: this.get_block_id(dragnode),
+            bui_newregion: this.get_block_region(dropnode)
         };
 
         if (this.get('cmid')) {
             params.cmid = this.get('cmid');
         }
 
-        if (dragnode.next('.'+this.samenodeclass) && !dragnode.next('.'+this.samenodeclass).hasClass(CSS.BLOCKADMINBLOCK)) {
-            params.bui_beforeid = this.get_block_id(dragnode.next('.'+this.samenodeclass));
+        if (dragnode.next('.' + this.samenodeclass) && !dragnode.next('.' + this.samenodeclass).hasClass(CSS.BLOCKADMINBLOCK)) {
+            params.bui_beforeid = this.get_block_id(dragnode.next('.' + this.samenodeclass));
         }
 
         // Do AJAX request
-        Y.io(M.cfg.wwwroot+AJAXURL, {
+        Y.io(M.cfg.wwwroot + AJAXURL, {
             method: 'POST',
             data: params,
             on: {
-                start : function() {
+                start: function() {
                     lightbox.show();
                 },
                 success: function(tid, response) {
@@ -284,63 +296,53 @@ Y.extend(DRAGBLOCK, M.core.dragdrop, {
                         if (responsetext.error) {
                             new M.core.ajaxException(responsetext);
                         }
-                    } catch (e) {}
+                    } catch (e) {
+                        // Ignore.
+                    }
                 },
                 failure: function(tid, response) {
                     this.ajax_failure(response);
                     lightbox.hide();
                 }
             },
-            context:this
+            context: this
         });
     }
 }, {
-    NAME : 'core-blocks-dragdrop',
-    ATTRS : {
-        courseid : {
-            value : null
+    NAME: 'core-blocks-dragdrop',
+    ATTRS: {
+        courseid: {
+            value: null
         },
-        cmid : {
-            value : null
+        cmid: {
+            value: null
         },
-        contextid : {
-            value : null
+        contextid: {
+            value: null
         },
-        pagelayout : {
-            value : null
+        pagelayout: {
+            value: null
         },
-        pagetype : {
-            value : null
+        pagetype: {
+            value: null
         },
-        subpage : {
-            value : null
+        subpage: {
+            value: null
         },
-        regions : {
-            value : null
+        regions: {
+            value: null
         }
     }
 });
 
-/**
- * Core namespace.
- * @static
- * @class core
- */
 M.core = M.core || {};
-
-/**
- * Block drag and drop static class.
- * @namespace M.core
- * @class blockdraganddrop
- * @static
- */
 M.core.blockdraganddrop = M.core.blockdraganddrop || {};
 
 /**
  * True if the page is using the new blocks methods.
  * @private
  * @static
- * @property _isusingnewblocksmethod
+ * @property M.core.blockdraganddrop._isusingnewblocksmethod
  * @type Boolean
  * @default null
  */
@@ -349,7 +351,7 @@ M.core.blockdraganddrop._isusingnewblocksmethod = null;
 /**
  * Returns true if the page is using the new blocks methods.
  * @static
- * @method is_using_blocks_render_method
+ * @method M.core.blockdraganddrop.is_using_blocks_render_method
  * @return Boolean
  */
 M.core.blockdraganddrop.is_using_blocks_render_method = function() {
@@ -357,6 +359,9 @@ M.core.blockdraganddrop.is_using_blocks_render_method = function() {
         var goodregions = Y.all('.block-region[data-blockregion]').size();
         var allregions = Y.all('.block-region').size();
         this._isusingnewblocksmethod = (allregions === goodregions);
+        if (goodregions > 0 && allregions > 0 && goodregions !== allregions) {
+            Y.log('Both core_renderer::blocks and core_renderer::blocks_for_region have been used.', 'warn', 'moodle-core_blocks');
+        }
     }
     return this._isusingnewblocksmethod;
 };
@@ -365,19 +370,21 @@ M.core.blockdraganddrop.is_using_blocks_render_method = function() {
  * Initialises a drag and drop manager.
  * This should only ever be called once for a page.
  * @static
- * @method init
+ * @method M.core.blockdraganddrop.init
  * @param {Object} params
  * @return Manager
  */
 M.core.blockdraganddrop.init = function(params) {
     if (this.is_using_blocks_render_method()) {
+        Y.log('Block drag and drop initialised for the blocks method.', 'info', 'moodle-core_blocks');
         new MANAGER(params);
     } else {
+        Y.log('Block drag and drop initialised with the legacy manager (blocks_for_region used).', 'info', 'moodle-core_blocks');
         new DRAGBLOCK(params);
     }
 };
 
-/**
+/*
  * Legacy code to keep things working.
  */
 M.core_blocks = M.core_blocks || {};
@@ -400,7 +407,7 @@ M.core_blocks.init_dragdrop = function(params) {
  * @constructor
  * @extends M.core.dragdrop
  */
-var MANAGER = function() {
+MANAGER = function() {
     MANAGER.superclass.constructor.apply(this, arguments);
 };
 MANAGER.prototype = {
@@ -413,7 +420,7 @@ MANAGER.prototype = {
      * @type Node
      * @default null
      */
-    skipnodetop : null,
+    skipnodetop: null,
 
     /**
      * The skip block link from below the block being dragged while a drag is in progress.
@@ -423,7 +430,7 @@ MANAGER.prototype = {
      * @type Node
      * @default null
      */
-    skipnodebottom : null,
+    skipnodebottom: null,
 
     /**
      * An associative object of regions and the
@@ -432,28 +439,29 @@ MANAGER.prototype = {
      * @type {BLOCKREGION} [regionname]* Each item uses the region name as the key with the value being
      *      an instance of the BLOCKREGION class.
      */
-    regionobjects : {},
+    regionobjects: {},
 
     /**
      * Called during the initialisation process of the object.
      * @method initializer
      */
-    initializer : function() {
+    initializer: function() {
         Y.log('Initialising drag and drop for blocks.', 'info');
         var regionnames = this.get('regions'),
             i = 0,
             region,
             regionname,
-            droptarget,
             dragdelegation;
 
         // Evil required by M.core.dragdrop.
         this.groups = ['block'];
         this.samenodeclass = CSS.BLOCK;
         this.parentnodeclass = CSS.BLOCKREGION;
+        // Detect the direction of travel.
+        this.detectkeyboarddirection = true;
 
-        // Add relevant classes and ID to 'content' block region on My Home page.
-        var myhomecontent = Y.Node.all('body#'+CSS.MYINDEX+' #'+CSS.REGIONMAIN+' > .'+CSS.REGIONCONTENT);
+        // Add relevant classes and ID to 'content' block region on Dashboard page.
+        var myhomecontent = Y.Node.all('body#' + CSS.MYINDEX + ' #' + CSS.REGIONMAIN + ' > .' + CSS.REGIONCONTENT);
         if (myhomecontent.size() > 0) {
             var contentregion = myhomecontent.item(0);
             contentregion.addClass(CSS.BLOCKREGION);
@@ -464,16 +472,16 @@ MANAGER.prototype = {
         for (i in regionnames) {
             regionname = regionnames[i];
             region = new BLOCKREGION({
-                manager : this,
-                region : regionname,
-                node : Y.one('#block-region-'+regionname)
+                manager: this,
+                region: regionname,
+                node: Y.one('#block-region-' + regionname)
             });
             this.regionobjects[regionname] = region;
 
             // Setting blockregion as droptarget (the case when it is empty)
             // The region-post (the right one)
             // is very narrow, so add extra padding on the left to drop block on it.
-            droptarget = new Y.DD.Drop({
+            new Y.DD.Drop({
                 node: region.get_droptarget(),
                 groups: this.groups,
                 padding: '40 240 40 240'
@@ -482,10 +490,10 @@ MANAGER.prototype = {
             // Make each div element in the list of blocks draggable
             dragdelegation = new Y.DD.Delegate({
                 container: region.get_droptarget(),
-                nodes: '.'+CSS.BLOCK,
+                nodes: '.' + CSS.BLOCK,
                 target: true,
                 handles: [SELECTOR.DRAGHANDLE],
-                invalid: '.block-hider-hide, .block-hider-show, .moveto',
+                invalid: '.block-hider-hide, .block-hider-show, .moveto, .block_fake',
                 dragConfig: {groups: this.groups}
             });
             dragdelegation.dd.plug(Y.Plugin.DDProxy, {
@@ -493,9 +501,10 @@ MANAGER.prototype = {
                 moveOnEnd: false
             });
             dragdelegation.dd.plug(Y.Plugin.DDWinScroll);
-            // On the mouse down event we will enable all block regions so that they can be dragged to.
-            // This is VERY important as without it dnd won't work for empty block regions.
-            dragdelegation.on('drag:mouseDown', this.enable_all_regions, this);
+
+            // On the DD Manager start operation, we enable all block regions so that they can be drop targets. This
+            // must be done *before* drag:start but after dragging has been initialised.
+            Y.DD.DDM.on('ddm:start', this.enable_all_regions, this);
 
             region.change_block_move_icons(this);
         }
@@ -506,9 +515,9 @@ MANAGER.prototype = {
      * Returns the ID of the block the given node represents.
      * @method get_block_id
      * @param {Node} node
-     * @returns {int} The blocks ID in the database.
+     * @return {int} The blocks ID in the database.
      */
-    get_block_id : function(node) {
+    get_block_id: function(node) {
         return Number(node.get('id').replace(/inst/i, ''));
     },
 
@@ -516,9 +525,9 @@ MANAGER.prototype = {
      * Returns the block region that the node is part of or belonging to.
      * @method get_block_region
      * @param {Y.Node} node
-     * @returns {string} The region name.
+     * @return {string} The region name.
      */
-    get_block_region : function(node) {
+    get_block_region: function(node) {
         if (!node.test('[data-blockregion]')) {
             node = node.ancestor('[data-blockregion]');
         }
@@ -529,20 +538,32 @@ MANAGER.prototype = {
      * Returns the BLOCKREGION instance that represents the block region the given node is part of.
      * @method get_region_object
      * @param {Y.Node} node
-     * @returns {BLOCKREGION}
+     * @return {BLOCKREGION}
      */
-    get_region_object : function(node) {
+    get_region_object: function(node) {
         return this.regionobjects[this.get_block_region(node)];
     },
 
     /**
      * Enables all fo the regions so that they are all visible while dragging is occuring.
+     *
      * @method enable_all_regions
-     * @returns {undefined}
      */
-    enable_all_regions : function() {
-        var i = 0;
+    enable_all_regions: function() {
+        var groups = Y.DD.DDM.activeDrag.get('groups');
+
+        // As we're called by Y.DD.DDM, we can't be certain that the call
+        // relates specifically to a block drag/drop operation. Test
+        // whether the relevant group applies here.
+        if (!groups || Y.Array.indexOf(groups, 'block') === -1) {
+            return;
+        }
+
+        var i;
         for (i in this.regionobjects) {
+            if (!this.regionobjects.hasOwnProperty(i)) {
+                continue;
+            }
             this.regionobjects[i].enable();
         }
     },
@@ -550,9 +571,8 @@ MANAGER.prototype = {
     /**
      * Disables enabled regions if they contain no blocks.
      * @method disable_regions_if_required
-     * @returns {undefined}
      */
-    disable_regions_if_required : function() {
+    disable_regions_if_required: function() {
         var i = 0;
         for (i in this.regionobjects) {
             this.regionobjects[i].disable_if_required();
@@ -563,9 +583,8 @@ MANAGER.prototype = {
      * Called by M.core.dragdrop.global_drag_start when dragging starts.
      * @method drag_start
      * @param {Event} e
-     * @returns {undefined}
      */
-    drag_start : function(e) {
+    drag_start: function(e) {
         // Get our drag object
         var drag = e.target;
 
@@ -585,16 +604,17 @@ MANAGER.prototype = {
      * Called by M.core.dragdrop.global_drop_over when something is dragged over a drop target.
      * @method drop_over
      * @param {Event} e
-     * @returns {undefined}
      */
-    drop_over : function(e) {
+    drop_over: function(e) {
         // Get a reference to our drag and drop nodes
         var drag = e.drag.get('node');
         var drop = e.drop.get('node');
 
         // We need to fix the case when parent drop over event has determined
         // 'goingup' and appended the drag node after admin-block.
-        if (drop.hasClass(CSS.REGIONCONTENT) && drop.one('.'+CSS.BLOCKADMINBLOCK) && drop.one('.'+CSS.BLOCKADMINBLOCK).next('.'+CSS.BLOCK)) {
+        if (drop.hasClass(CSS.REGIONCONTENT) &&
+                drop.one('.' + CSS.BLOCKADMINBLOCK) &&
+                drop.one('.' + CSS.BLOCKADMINBLOCK).next('.' + CSS.BLOCK)) {
             drop.prepend(drag);
         }
     },
@@ -602,9 +622,8 @@ MANAGER.prototype = {
     /**
      * Called by M.core.dragdrop.global_drop_end when a drop has been completed.
      * @method drop_end
-     * @returns {undefined}
      */
-    drop_end : function() {
+    drop_end: function() {
         // Clear variables.
         this.skipnodetop = null;
         this.skipnodebottom = null;
@@ -612,12 +631,13 @@ MANAGER.prototype = {
     },
 
     /**
-     * Called by M.core.dragdrop.global_drag_dropmiss when something has been dropped on a node that isn't contained by a drop target.
+     * Called by M.core.dragdrop.global_drag_dropmiss when something has been dropped on a node that isn't contained by
+     * a drop target.
+     *
      * @method drag_dropmiss
      * @param {Event} e
-     * @returns {undefined}
      */
-    drag_dropmiss : function(e) {
+    drag_dropmiss: function(e) {
         // Missed the target, but we assume the user intended to drop it
         // on the last ghost node location, e.drag and e.drop should be
         // prepared by global_drag_dropmiss parent so simulate drop_hit(e).
@@ -628,9 +648,8 @@ MANAGER.prototype = {
      * Called by M.core.dragdrop.global_drag_hit when something has been dropped on a drop target.
      * @method drop_hit
      * @param {Event} e
-     * @returns {undefined}
      */
-    drop_hit : function(e) {
+    drop_hit: function(e) {
         // Get a reference to our drag node
         var dragnode = e.drag.get('node');
         var dropnode = e.drop.get('node');
@@ -653,31 +672,31 @@ MANAGER.prototype = {
 
         // Prepare request parameters
         var params = {
-            sesskey : M.cfg.sesskey,
-            courseid : this.get('courseid'),
-            pagelayout : this.get('pagelayout'),
-            pagetype : this.get('pagetype'),
-            subpage : this.get('subpage'),
-            contextid : this.get('contextid'),
-            action : 'move',
-            bui_moveid : this.get_block_id(dragnode),
-            bui_newregion : this.get_block_region(dropnode)
+            sesskey: M.cfg.sesskey,
+            courseid: this.get('courseid'),
+            pagelayout: this.get('pagelayout'),
+            pagetype: this.get('pagetype'),
+            subpage: this.get('subpage'),
+            contextid: this.get('contextid'),
+            action: 'move',
+            bui_moveid: this.get_block_id(dragnode),
+            bui_newregion: this.get_block_region(dropnode)
         };
 
         if (this.get('cmid')) {
             params.cmid = this.get('cmid');
         }
 
-        if (dragnode.next('.'+CSS.BLOCK) && !dragnode.next('.'+CSS.BLOCK).hasClass(CSS.BLOCKADMINBLOCK)) {
-            params.bui_beforeid = this.get_block_id(dragnode.next('.'+CSS.BLOCK));
+        if (dragnode.next('.' + CSS.BLOCK) && !dragnode.next('.' + CSS.BLOCK).hasClass(CSS.BLOCKADMINBLOCK)) {
+            params.bui_beforeid = this.get_block_id(dragnode.next('.' + CSS.BLOCK));
         }
 
         // Do AJAX request
-        Y.io(M.cfg.wwwroot+AJAXURL, {
+        Y.io(M.cfg.wwwroot + AJAXURL, {
             method: 'POST',
             data: params,
             on: {
-                start : function() {
+                start: function() {
                     lightbox.show();
                 },
                 success: function(tid, response) {
@@ -689,31 +708,33 @@ MANAGER.prototype = {
                         if (responsetext.error) {
                             new M.core.ajaxException(responsetext);
                         }
-                    } catch (e) {}
+                    } catch (e) {
+                        // Ignore.
+                    }
                 },
                 failure: function(tid, response) {
                     this.ajax_failure(response);
                     lightbox.hide();
                 },
-                complete : function() {
+                complete: function() {
                     this.disable_regions_if_required();
                 }
             },
-            context:this
+            context: this
         });
     }
 };
 Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
-    NAME : 'core-blocks-dragdrop-manager',
-    ATTRS : {
+    NAME: 'core-blocks-dragdrop-manager',
+    ATTRS: {
         /**
          * The Course ID if there is one.
          * @attribute courseid
          * @type int|null
          * @default null
          */
-        courseid : {
-            value : null
+        courseid: {
+            value: null
         },
 
         /**
@@ -722,8 +743,8 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
          * @type int|null
          * @default null
          */
-        cmid : {
-            value : null
+        cmid: {
+            value: null
         },
 
         /**
@@ -732,8 +753,8 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
          * @type int|null
          * @default null
          */
-        contextid : {
-            value : null
+        contextid: {
+            value: null
         },
 
         /**
@@ -742,8 +763,8 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
          * @type string|null
          * @default null
          */
-        pagelayout : {
-            value : null
+        pagelayout: {
+            value: null
         },
 
         /**
@@ -752,8 +773,8 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
          * @type string|null
          * @default null
          */
-        pagetype : {
-            value : null
+        pagetype: {
+            value: null
         },
 
         /**
@@ -762,8 +783,8 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
          * @type string|null
          * @default null
          */
-        subpage : {
-            value : null
+        subpage: {
+            value: null
         },
 
         /**
@@ -772,8 +793,8 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
          * @type array|null
          * @default Array[]
          */
-        regions : {
-            value : []
+        regions: {
+            value: []
         }
     }
 });
@@ -791,9 +812,9 @@ Y.extend(MANAGER, M.core.dragdrop, MANAGER.prototype, {
  * @namespace M.core.blockdraganddrop
  * @class BlockRegion
  * @constructor
- * @extends Y.Base
+ * @extends Base
  */
-var BLOCKREGION = function() {
+BLOCKREGION = function() {
     BLOCKREGION.superclass.constructor.apply(this, arguments);
 };
 BLOCKREGION.prototype = {
@@ -801,15 +822,15 @@ BLOCKREGION.prototype = {
      * Called during the initialisation process of the object.
      * @method initializer
      */
-    initializer : function() {
+    initializer: function() {
         var node = this.get('node');
-        Y.log('Block region `'+this.get('region')+'` initialising', 'info');
+        Y.log('Block region `' + this.get('region') + '` initialising', 'info');
         if (!node) {
             Y.log('block region known about but no HTML structure found for it. Guessing structure.', 'warn');
             node = this.create_and_add_node();
         }
         var body = Y.one('body'),
-            hasblocks = node.all('.'+CSS.BLOCK).size() > 0,
+            hasblocks = node.all('.' + CSS.BLOCK).size() > 0,
             hasregionclass = this.get_has_region_class();
         this.set('hasblocks', hasblocks);
         if (!body.hasClass(hasregionclass)) {
@@ -824,10 +845,10 @@ BLOCKREGION.prototype = {
      * @method create_and_add_node
      * @return Node The newly created Node
      */
-    create_and_add_node : function() {
+    create_and_add_node: function() {
         var c = Y.Node.create,
             region = this.get('region'),
-            node = c('<div id="block-region-'+region+'" data-droptarget="1"></div>')
+            node = c('<div id="block-region-' + region + '" data-droptarget="1"></div>')
                 .addClass(CSS.BLOCKREGION)
                 .setData('blockregion', region),
             regions = this.get('manager').get('regions'),
@@ -848,13 +869,13 @@ BLOCKREGION.prototype = {
 
         if (haspre !== false && haspost !== false) {
             if (region === haspre) {
-                post = Y.one('#block-region-'+haspost);
+                post = Y.one('#block-region-' + haspost);
                 if (post) {
                     post.insert(node, 'before');
                     added = true;
                 }
             } else {
-                pre = Y.one('#block-region-'+haspre);
+                pre = Y.one('#block-region-' + haspre);
                 if (pre) {
                     pre.insert(node, 'after');
                     added = true;
@@ -874,14 +895,11 @@ BLOCKREGION.prototype = {
      * @param M.core.dragdrop the block manager
      * @method change_block_move_icons
      */
-    change_block_move_icons : function(manager) {
-        var handle, icon;
-        this.get('node').all('.'+CSS.BLOCK+' a.'+CSS.EDITINGMOVE).each(function(moveicon){
+    change_block_move_icons: function(manager) {
+        var handle;
+        this.get('node').all('.' + CSS.BLOCK + ' a.' + CSS.EDITINGMOVE).each(function(moveicon) {
             moveicon.setStyle('cursor', 'move');
             handle = manager.get_drag_handle(moveicon.getAttribute('title'), '', 'icon', true);
-            icon = handle.one('img');
-            icon.addClass('iconsmall');
-            icon.removeClass('icon');
             moveicon.replace(handle);
         });
     },
@@ -891,8 +909,8 @@ BLOCKREGION.prototype = {
      * @method get_has_region_class
      * @return String
      */
-    get_has_region_class : function() {
-        return 'has-region-'+this.get('region');
+    get_has_region_class: function() {
+        return 'has-region-' + this.get('region');
     },
 
     /**
@@ -900,8 +918,8 @@ BLOCKREGION.prototype = {
      * @method get_empty_region_class
      * @return String
      */
-    get_empty_region_class : function() {
-        return 'empty-region-'+this.get('region');
+    get_empty_region_class: function() {
+        return 'empty-region-' + this.get('region');
     },
 
     /**
@@ -909,8 +927,8 @@ BLOCKREGION.prototype = {
      * @method get_used_region_class
      * @return String
      */
-    get_used_region_class : function() {
-        return 'used-region-'+this.get('region');
+    get_used_region_class: function() {
+        return 'used-region-' + this.get('region');
     },
 
     /**
@@ -918,7 +936,7 @@ BLOCKREGION.prototype = {
      * @method get_droptarget
      * @return Node
      */
-    get_droptarget : function() {
+    get_droptarget: function() {
         var node = this.get('node');
         if (node.test('[data-droptarget="1"]')) {
             return node;
@@ -931,7 +949,7 @@ BLOCKREGION.prototype = {
      * This is done even if it is empty.
      * @method enable
      */
-    enable : function() {
+    enable: function() {
         Y.one('body').addClass(this.get_used_region_class()).removeClass(this.get_empty_region_class());
     },
 
@@ -939,15 +957,15 @@ BLOCKREGION.prototype = {
      * Disables the region if it contains no blocks, essentially hiding it from the user.
      * @method disable_if_required
      */
-    disable_if_required : function() {
-        if (this.get('node').all('.'+CSS.BLOCK).size() === 0) {
+    disable_if_required: function() {
+        if (this.get('node').all('.' + CSS.BLOCK).size() === 0) {
             Y.one('body').addClass(this.get_empty_region_class()).removeClass(this.get_used_region_class());
         }
     }
 };
 Y.extend(BLOCKREGION, Y.Base, BLOCKREGION.prototype, {
-    NAME : 'core-blocks-dragdrop-blockregion',
-    ATTRS : {
+    NAME: 'core-blocks-dragdrop-blockregion',
+    ATTRS: {
 
         /**
          * The drag and drop manager that created this block region instance.
@@ -955,10 +973,10 @@ Y.extend(BLOCKREGION, Y.Base, BLOCKREGION.prototype, {
          * @type M.core.blockdraganddrop.Manager
          * @writeOnce
          */
-        manager : {
+        manager: {
             // Can only be set during initialisation and must be set then.
-            writeOnce : 'initOnly',
-            validator : function (value) {
+            writeOnce: 'initOnly',
+            validator: function(value) {
                 return Y.Lang.isObject(value) && value instanceof MANAGER;
             }
         },
@@ -969,10 +987,10 @@ Y.extend(BLOCKREGION, Y.Base, BLOCKREGION.prototype, {
          * @type String
          * @writeOnce
          */
-        region : {
+        region: {
             // Can only be set during initialisation and must be set then.
-            writeOnce : 'initOnly',
-            validator : function (value) {
+            writeOnce: 'initOnly',
+            validator: function(value) {
                 return Y.Lang.isString(value);
             }
         },
@@ -982,8 +1000,8 @@ Y.extend(BLOCKREGION, Y.Base, BLOCKREGION.prototype, {
          * @attribute region
          * @type Y.Node
          */
-        node : {
-            validator : function (value) {
+        node: {
+            validator: function(value) {
                 return Y.Lang.isObject(value) || Y.Lang.isNull(value);
             }
         },
@@ -994,9 +1012,9 @@ Y.extend(BLOCKREGION, Y.Base, BLOCKREGION.prototype, {
          * @type Boolean
          * @default false
          */
-        hasblocks : {
-            value : false,
-            validator : function (value) {
+        hasblocks: {
+            value: false,
+            validator: function(value) {
                 return Y.Lang.isBoolean(value);
             }
         }

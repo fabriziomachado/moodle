@@ -270,6 +270,8 @@ class enrol_manual_editselectedusers_operation extends enrol_bulk_enrolment_oper
                     $event->trigger();
                 }
             }
+            // Delete cached course contacts for this course because they may be affected.
+            cache::make('core', 'coursecontacts')->delete($manager->get_context()->instanceid);
             return true;
         }
 
@@ -348,19 +350,23 @@ class enrol_manual_deleteselectedusers_operation extends enrol_bulk_enrolment_op
      * @param stdClass $properties The data returned by the form.
      */
     public function process(course_enrolment_manager $manager, array $users, stdClass $properties) {
-        global $DB;
-
         if (!has_capability("enrol/manual:unenrol", $manager->get_context())) {
             return false;
         }
+        $counter = 0;
         foreach ($users as $user) {
             foreach ($user->enrolments as $enrolment) {
                 $plugin = $enrolment->enrolmentplugin;
                 $instance = $enrolment->enrolmentinstance;
                 if ($plugin->allow_unenrol_user($instance, $enrolment)) {
                     $plugin->unenrol_user($instance, $user->id);
+                    $counter++;
                 }
             }
+        }
+        // Display a notification message after the bulk user unenrollment.
+        if ($counter > 0) {
+            \core\notification::info(get_string('totalunenrolledusers', 'enrol', $counter));
         }
         return true;
     }
@@ -463,4 +469,35 @@ function enrol_manual_migrate_plugin_enrolments($enrol) {
         $DB->execute($sql, $params);
     }
     $rs->close();
+}
+
+/**
+ * Gets an array of the cohorts that can be enrolled in this course.
+ *
+ * @param int $enrolid
+ * @param string $search
+ * @param int $page Defaults to 0
+ * @param int $perpage Defaults to 25
+ * @param int $addedenrollment
+ * @return array Array(totalcohorts => int, cohorts => array)
+ */
+function enrol_manual_get_potential_cohorts($context, $enrolid, $search = '', $page = 0, $perpage = 25, $addedenrollment = 0) {
+    global $CFG;
+    require_once($CFG->dirroot . '/cohort/lib.php');
+
+    $allcohorts = cohort_get_available_cohorts($context, COHORT_WITH_NOTENROLLED_MEMBERS_ONLY, 0, 0, $search);
+    $totalcohorts = count($allcohorts);
+    $cohorts = array();
+    $cnt = 0;
+    foreach ($allcohorts as $c) {
+        if ($cnt >= $page * $perpage && (!$perpage || $cnt < ($page+1)*$perpage)) {
+            $cohorts[] = (object)array(
+                'id' => $c->id,
+                'name' => format_string($c->name, true, array('context' => $c->contextid)),
+                'cnt' => $c->memberscnt - $c->enrolledcnt
+            );
+        }
+        $cnt++;
+    }
+    return array('totalcohorts' => $totalcohorts, 'cohorts' => $cohorts);
 }

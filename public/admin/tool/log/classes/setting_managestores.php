@@ -109,8 +109,8 @@ class tool_log_setting_managestores extends admin_setting {
         $strversion = get_string('version');
 
         $pluginmanager = core_plugin_manager::instance();
-
-        $available = \tool_log\log\manager::get_store_plugins();
+        $logmanager = new \tool_log\log\manager();
+        $available = $logmanager->get_store_plugins();
         $enabled = get_config('tool_log', 'enabled_stores');
         if (!$enabled) {
             $enabled = array();
@@ -132,8 +132,10 @@ class tool_log_setting_managestores extends admin_setting {
         $return .= $OUTPUT->box_start('generalbox loggingui');
 
         $table = new html_table();
-        $table->head = array(get_string('name'), $strversion, $strenable, $strup . '/' . $strdown, $strsettings, $struninstall);
-        $table->colclasses = array('leftalign', 'centeralign', 'centeralign', 'centeralign', 'centeralign', 'centeralign');
+        $table->head = array(get_string('name'), get_string('reportssupported', 'tool_log'), $strversion, $strenable,
+                $strup . '/' . $strdown, $strsettings, $struninstall);
+        $table->colclasses = array('leftalign', 'centeralign', 'centeralign', 'centeralign', 'centeralign', 'centeralign',
+                'centeralign');
         $table->id = 'logstoreplugins';
         $table->attributes['class'] = 'admintable generaltable';
         $table->data = array();
@@ -156,18 +158,25 @@ class tool_log_setting_managestores extends admin_setting {
                 $name = $store;
             }
 
+            $reports = $logmanager->get_supported_reports($store);
+            if (!empty($reports)) {
+                $supportedreports = implode(', ', $reports);
+            } else {
+                $supportedreports = '-';
+            }
+
             // Hide/show links.
             if (isset($enabled[$store])) {
                 $aurl = new moodle_url($url, array('action' => 'disable', 'store' => $store));
                 $hideshow = "<a href=\"$aurl\">";
-                $hideshow .= "<img src=\"" . $OUTPUT->pix_url('t/hide') . "\" class=\"iconsmall\" alt=\"$strdisable\" /></a>";
+                $hideshow .= $OUTPUT->pix_icon('t/hide', $strdisable) . '</a>';
                 $isenabled = true;
                 $displayname = "<span>$name</span>";
             } else {
                 if (isset($available[$store])) {
                     $aurl = new moodle_url($url, array('action' => 'enable', 'store' => $store));
                     $hideshow = "<a href=\"$aurl\">";
-                    $hideshow .= "<img src=\"" . $OUTPUT->pix_url('t/show') . "\" class=\"iconsmall\" alt=\"$strenable\" /></a>";
+                    $hideshow .= $OUTPUT->pix_icon('t/show', $strenable) . '</a>';
                     $isenabled = false;
                     $displayname = "<span class=\"dimmed_text\">$name</span>";
                 } else {
@@ -179,7 +188,7 @@ class tool_log_setting_managestores extends admin_setting {
             if ($PAGE->theme->resolve_image_location('icon', $store, false)) {
                 $icon = $OUTPUT->pix_icon('icon', '', $store, array('class' => 'icon pluginicon'));
             } else {
-                $icon = $OUTPUT->pix_icon('spacer', '', 'moodle', array('class' => 'icon pluginicon noicon'));
+                $icon = $OUTPUT->spacer();
             }
 
             // Up/down link (only if store is enabled).
@@ -188,16 +197,16 @@ class tool_log_setting_managestores extends admin_setting {
                 if ($updowncount > 1) {
                     $aurl = new moodle_url($url, array('action' => 'up', 'store' => $store));
                     $updown .= "<a href=\"$aurl\">";
-                    $updown .= "<img src=\"" . $OUTPUT->pix_url('t/up') . "\" alt=\"$strup\" class=\"iconsmall\" /></a>&nbsp;";
+                    $updown .= $OUTPUT->pix_icon('t/up', $strup) . '</a>&nbsp;';
                 } else {
-                    $updown .= "<img src=\"" . $OUTPUT->pix_url('spacer') . "\" class=\"iconsmall\" alt=\"\" />&nbsp;";
+                    $updown .= $OUTPUT->spacer();
                 }
                 if ($updowncount < $storecount) {
                     $aurl = new moodle_url($url, array('action' => 'down', 'store' => $store));
                     $updown .= "<a href=\"$aurl\">";
-                    $updown .= "<img src=\"" . $OUTPUT->pix_url('t/down') . "\" alt=\"$strdown\" class=\"iconsmall\" /></a>";
+                    $updown .= $OUTPUT->pix_icon('t/down', $strdown) . '</a>&nbsp;';
                 } else {
-                    $updown .= "<img src=\"" . $OUTPUT->pix_url('spacer') . "\" class=\"iconsmall\" alt=\"\" />";
+                    $updown .= $OUTPUT->spacer();
                 }
                 ++$updowncount;
             }
@@ -220,7 +229,7 @@ class tool_log_setting_managestores extends admin_setting {
             }
 
             // Add a row to the table.
-            $table->data[] = array($icon . $displayname, $version, $hideshow, $updown, $settings, $uninstall);
+            $table->data[] = array($icon . $displayname, $supportedreports, $version, $hideshow, $updown, $settings, $uninstall);
 
             $printed[$store] = true;
         }

@@ -6,11 +6,16 @@
  */
 class HTMLPurifier_HTMLModule_SafeScripting extends HTMLPurifier_HTMLModule
 {
-
+    /**
+     * @type string
+     */
     public $name = 'SafeScripting';
 
-    public function setup($config) {
-
+    /**
+     * @param HTMLPurifier_Config $config
+     */
+    public function setup($config)
+    {
         // These definitions are not intrinsically safe: the attribute transforms
         // are a vital part of ensuring safety.
 
@@ -18,20 +23,18 @@ class HTMLPurifier_HTMLModule_SafeScripting extends HTMLPurifier_HTMLModule
         $script = $this->addElement(
             'script',
             'Inline',
-            'Empty',
+            'Optional:', // Not `Empty` to not allow to autoclose the <script /> tag @see https://www.w3.org/TR/html4/interact/scripts.html
             null,
             array(
                 // While technically not required by the spec, we're forcing
                 // it to this value.
                 'type' => 'Enum#text/javascript',
-                'src*'  => new HTMLPurifier_AttrDef_Enum(array_keys($allowed))
+                'src*' => new HTMLPurifier_AttrDef_Enum(array_keys($allowed), /*case sensitive*/ true)
             )
         );
         $script->attr_transform_pre[] =
         $script->attr_transform_post[] = new HTMLPurifier_AttrTransform_ScriptRequired();
-
     }
-
 }
 
 // vim: et sw=4 sts=4
