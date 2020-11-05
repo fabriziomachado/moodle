@@ -61,10 +61,17 @@ class restore_scorm_activity_structure_step extends restore_activity_structure_s
 
         $data->course = $this->get_courseid();
 
+        // Any changes to the list of dates that needs to be rolled should be same during course restore and course reset.
+        // See MDL-9367.
         $data->timeopen = $this->apply_date_offset($data->timeopen);
         $data->timeclose = $this->apply_date_offset($data->timeclose);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
+        if (!isset($data->displayactivityname)) {
+            $data->displayactivityname = true;
+        }
+        if (!isset($data->completionstatusallscos)) {
+            $data->completionstatusallscos = false;
+        }
         // insert the scorm record
         $newitemid = $DB->insert_record('scorm', $data);
         // immediately after inserting "activity" record, call this
@@ -176,7 +183,6 @@ class restore_scorm_activity_structure_step extends restore_activity_structure_s
         $data->scormid = $this->get_new_parentid('scorm');
         $data->scoid = $this->get_new_parentid('scorm_sco');
         $data->userid = $this->get_mappingid('user', $data->userid);
-        $data->timemodified = $this->apply_date_offset($data->timemodified);
 
         $newitemid = $DB->insert_record('scorm_scoes_track', $data);
         // No need to save this mapping as far as nothing depend on it
@@ -195,6 +201,16 @@ class restore_scorm_activity_structure_step extends restore_activity_structure_s
         $scormid = $this->get_new_parentid('scorm');
         $scorm = $DB->get_record('scorm', array('id' => $scormid));
         $scorm->launch = $this->get_mappingid('scorm_sco', $scorm->launch, '');
+
+        if (!empty($scorm->launch)) {
+            // Check that this sco has a valid launch value.
+            $scolaunch = $DB->get_field('scorm_scoes', 'launch', array('id' => $scorm->launch));
+            if (empty($scolaunch)) {
+                // This is not a valid sco - set to empty so we can find a valid launch sco.
+                $scorm->launch = '';
+            }
+        }
+
         if (empty($scorm->launch)) {
             // This scorm has an invalid launch param - we need to calculate it and get the first launchable sco.
             $sqlselect = 'scorm = ? AND '.$DB->sql_isnotempty('scorm_scoes', 'launch', false, true);

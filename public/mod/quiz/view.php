@@ -24,7 +24,7 @@
  */
 
 
-require_once(dirname(__FILE__) . '/../../config.php');
+require_once(__DIR__ . '/../../config.php');
 require_once($CFG->libdir.'/gradelib.php');
 require_once($CFG->dirroot.'/mod/quiz/locallib.php');
 require_once($CFG->libdir . '/completionlib.php');
@@ -69,11 +69,8 @@ $accessmanager = new quiz_access_manager($quizobj, $timenow,
         has_capability('mod/quiz:ignoretimelimits', $context, null, false));
 $quiz = $quizobj->get_quiz();
 
-// Log this request.
-add_to_log($course->id, 'quiz', 'view', 'view.php?id=' . $cm->id, $quiz->id, $cm->id);
-
-$completion = new completion_info($course);
-$completion->set_module_viewed($cm);
+// Trigger course_module_viewed event and completion.
+quiz_view($quiz, $course, $cm, $context);
 
 // Initialize $PAGE, compute blocks.
 $PAGE->set_url('/mod/quiz/view.php', array('id' => $cm->id));
@@ -81,12 +78,13 @@ $PAGE->set_url('/mod/quiz/view.php', array('id' => $cm->id));
 // Create view object which collects all the information the renderer will need.
 $viewobj = new mod_quiz_view_object();
 $viewobj->accessmanager = $accessmanager;
-$viewobj->canreviewmine = $canreviewmine;
+$viewobj->canreviewmine = $canreviewmine || $canpreview;
 
 // Get this user's attempts.
 $attempts = quiz_get_user_attempts($quiz->id, $USER->id, 'finished', true);
 $lastfinishedattempt = end($attempts);
 $unfinished = false;
+$unfinishedattemptid = null;
 if ($unfinishedattempt = quiz_get_user_attempt_unfinished($quiz->id, $USER->id)) {
     $attempts[] = $unfinishedattempt;
 
@@ -99,6 +97,7 @@ if ($unfinishedattempt = quiz_get_user_attempt_unfinished($quiz->id, $USER->id))
     if (!$unfinished) {
         $lastfinishedattempt = $unfinishedattempt;
     }
+    $unfinishedattemptid = $unfinishedattempt->id;
     $unfinishedattempt = null; // To make it clear we do not use this again.
 }
 $numattempts = count($attempts);
@@ -147,7 +146,7 @@ $output = $PAGE->get_renderer('mod_quiz');
 // Print table with existing attempts.
 if ($attempts) {
     // Work out which columns we need, taking account what data is available in each attempt.
-    list($someoptions, $alloptions) = quiz_get_combined_reviewoptions($quiz, $attempts, $context);
+    list($someoptions, $alloptions) = quiz_get_combined_reviewoptions($quiz, $attempts);
 
     $viewobj->attemptcolumn  = $quiz->attempts != 1;
 
@@ -171,7 +170,11 @@ $viewobj->canedit = has_capability('mod/quiz:manage', $context);
 $viewobj->editurl = new moodle_url('/mod/quiz/edit.php', array('cmid' => $cm->id));
 $viewobj->backtocourseurl = new moodle_url('/course/view.php', array('id' => $course->id));
 $viewobj->startattempturl = $quizobj->start_attempt_url();
-$viewobj->startattemptwarning = $quizobj->confirm_start_attempt_message($unfinished);
+
+if ($accessmanager->is_preflight_check_required($unfinishedattemptid)) {
+    $viewobj->preflightcheckform = $accessmanager->get_preflight_check_form(
+            $viewobj->startattempturl, $unfinishedattemptid);
+}
 $viewobj->popuprequired = $accessmanager->attempt_must_be_in_popup();
 $viewobj->popupoptions = $accessmanager->get_popup_options();
 

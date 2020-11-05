@@ -36,6 +36,7 @@ $type      = optional_param('type', '', PARAM_SAFEDIR);
 $subtype   = optional_param('subtype', '', PARAM_SAFEDIR);
 $sheet     = optional_param('sheet', '', PARAM_SAFEDIR);
 $usesvg    = optional_param('svg', 1, PARAM_BOOL);
+$rtl       = optional_param('rtl', false, PARAM_BOOL);
 
 if (file_exists("$CFG->dirroot/theme/$themename/config.php")) {
     // The theme exists in standard location - ok.
@@ -47,6 +48,7 @@ if (file_exists("$CFG->dirroot/theme/$themename/config.php")) {
 
 $theme = theme_config::load($themename);
 $theme->force_svg_use($usesvg);
+$theme->set_rtl_mode($rtl);
 
 if ($type === 'editor') {
     $csscontent = $theme->get_css_content_editor();
@@ -55,7 +57,7 @@ if ($type === 'editor') {
 
 // We need some kind of caching here because otherwise the page navigation becomes
 // way too slow in theme designer mode. Feel free to create full cache definition later...
-$key = "$type $subtype $sheet $usesvg";
+$key = "$type $subtype $sheet $usesvg $rtl";
 $cache = cache::make_from_params(cache_store::MODE_APPLICATION, 'core', 'themedesigner', array('theme' => $themename));
 if ($content = $cache->get($key)) {
     if ($content['created'] > time() - THEME_DESIGNER_CACHE_LIFETIME) {
@@ -65,7 +67,6 @@ if ($content = $cache->get($key)) {
 }
 
 $csscontent = $theme->get_css_content_debug($type, $subtype, $sheet);
-
 $cache->set($key, array('data' => $csscontent, 'created' => time()));
 
 css_send_uncached_css($csscontent);

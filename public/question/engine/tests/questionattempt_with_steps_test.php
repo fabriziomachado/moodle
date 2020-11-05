@@ -30,8 +30,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 global $CFG;
-require_once(dirname(__FILE__) . '/../lib.php');
-require_once(dirname(__FILE__) . '/helpers.php');
+require_once(__DIR__ . '/../lib.php');
+require_once(__DIR__ . '/helpers.php');
 
 
 /**
@@ -57,8 +57,10 @@ class question_attempt_with_steps_test extends advanced_testcase {
         $this->qa = null;
     }
 
+    /**
+     * @expectedException moodle_exception
+     */
     public function test_get_step_before_start() {
-        $this->setExpectedException('moodle_exception');
         $step = $this->qa->get_step(-1);
     }
 
@@ -72,8 +74,10 @@ class question_attempt_with_steps_test extends advanced_testcase {
         $this->assertEquals(2, $step->get_qt_var('i'));
     }
 
+    /**
+     * @expectedException moodle_exception
+     */
     public function test_get_step_past_end() {
-        $this->setExpectedException('moodle_exception');
         $step = $this->qa->get_step(3);
     }
 
@@ -151,7 +155,7 @@ class question_attempt_with_steps_test extends advanced_testcase {
 
     public function test_cannot_get_min_fraction_before_start() {
         $qa = new question_attempt($this->question, 0);
-        $this->setExpectedException('moodle_exception');
+        $this->expectException('moodle_exception');
         $qa->get_min_fraction();
     }
 
@@ -162,7 +166,49 @@ class question_attempt_with_steps_test extends advanced_testcase {
 
     public function test_cannot_get_max_fraction_before_start() {
         $qa = new question_attempt($this->question, 0);
-        $this->setExpectedException('moodle_exception');
+        $this->expectException('moodle_exception');
         $qa->get_max_fraction();
+    }
+
+    /**
+     * Test cases for {@see test_validate_manual_mark()}.
+     *
+     * @return array test cases
+     */
+    public function validate_manual_mark_cases(): array {
+        // Recall, the DB schema stores question grade information to 7 decimal places.
+        return [
+            [0, 1, 2, null, ''],
+            [0, 1, 2, '', ''],
+            [0, 1, 2, '0', ''],
+            [0, 1, 2, '0.0', ''],
+            [0, 1, 2, '2,0', ''],
+            [0, 1, 2, 'frog', get_string('manualgradeinvalidformat', 'question')],
+            [0, 1, 2, '2.1', get_string('manualgradeoutofrange', 'question')],
+            [0, 1, 2, '-0,01', get_string('manualgradeoutofrange', 'question')],
+            [-0.3333333, 1, 0.75, '0.75', ''],
+            [-0.3333333, 1, 0.75, '0.7500001', get_string('manualgradeoutofrange', 'question')],
+            [-0.3333333, 1, 0.75, '-0.25', ''],
+            [-0.3333333, 1, 0.75, '-0.2500001', get_string('manualgradeoutofrange', 'question')],
+        ];
+    }
+
+    /**
+     * Test validate_manual_mark.
+     *
+     * @dataProvider validate_manual_mark_cases
+     *
+     * @param float $minfraction minimum fraction for the question being attempted.
+     * @param float $maxfraction maximum fraction for the question being attempted.
+     * @param float $maxmark marks for the question attempt.
+     * @param string|null $currentmark submitted mark.
+     * @param string $expectederror expected error, if any.
+     */
+    public function test_validate_manual_mark(float $minfraction, float $maxfraction,
+            float $maxmark, ?string $currentmark, string $expectederror) {
+        $this->qa->set_min_fraction($minfraction);
+        $this->qa->set_max_fraction($maxfraction);
+        $this->qa->set_max_mark($maxmark);
+        $this->assertSame($expectederror, $this->qa->validate_manual_mark($currentmark));
     }
 }

@@ -28,10 +28,12 @@ require_once('locallib.php');
 
 $attemptid = required_param('attempt', PARAM_INT);
 $slot = required_param('slot', PARAM_INT); // The question number in the attempt.
+$cmid = optional_param('cmid', null, PARAM_INT);
 
 $PAGE->set_url('/mod/quiz/comment.php', array('attempt' => $attemptid, 'slot' => $slot));
 
-$attemptobj = quiz_attempt::create($attemptid);
+$attemptobj = quiz_create_attempt_handling_errors($attemptid, $cmid);
+$student = $DB->get_record('user', array('id' => $attemptobj->get_userid()));
 
 // Can only grade finished attempts.
 if (!$attemptobj->is_finished()) {
@@ -42,19 +44,27 @@ if (!$attemptobj->is_finished()) {
 require_login($attemptobj->get_course(), false, $attemptobj->get_cm());
 $attemptobj->require_capability('mod/quiz:grade');
 
-// Log this action.
-add_to_log($attemptobj->get_courseid(), 'quiz', 'manualgrade', 'comment.php?attempt=' .
-        $attemptobj->get_attemptid() . '&slot=' . $slot,
-        $attemptobj->get_quizid(), $attemptobj->get_cmid());
-
 // Print the page header.
 $PAGE->set_pagelayout('popup');
+$PAGE->set_title(get_string('manualgradequestion', 'quiz', array(
+        'question' => format_string($attemptobj->get_question_name($slot)),
+        'quiz' => format_string($attemptobj->get_quiz_name()), 'user' => fullname($student))));
 $PAGE->set_heading($attemptobj->get_course()->fullname);
 $output = $PAGE->get_renderer('mod_quiz');
 echo $output->header();
 
 // Prepare summary information about this question attempt.
 $summarydata = array();
+
+// Student name.
+$userpicture = new user_picture($student);
+$userpicture->courseid = $attemptobj->get_courseid();
+$summarydata['user'] = array(
+    'title'   => $userpicture,
+    'content' => new action_link(new moodle_url('/user/view.php', array(
+            'id' => $student->id, 'course' => $attemptobj->get_courseid())),
+            fullname($student, true)),
+);
 
 // Quiz name.
 $summarydata['quizname'] = array(
@@ -74,6 +84,21 @@ if (data_submitted() && confirm_sesskey()) {
         $transaction = $DB->start_delegated_transaction();
         $attemptobj->process_submitted_actions(time());
         $transaction->allow_commit();
+
+        // Log this action.
+        $params = array(
+            'objectid' => $attemptobj->get_question_attempt($slot)->get_question_id(),
+            'courseid' => $attemptobj->get_courseid(),
+            'context' => context_module::instance($attemptobj->get_cmid()),
+            'other' => array(
+                'quizid' => $attemptobj->get_quizid(),
+                'attemptid' => $attemptobj->get_attemptid(),
+                'slot' => $slot
+            )
+        );
+        $event = \mod_quiz\event\question_manually_graded::create($params);
+        $event->trigger();
+
         echo $output->notification(get_string('changessaved'), 'notifysuccess');
         close_window(2, true);
         die;
@@ -98,7 +123,7 @@ echo $attemptobj->render_question_for_commenting($slot);
     <div>
         <div class="fitem fitem_actionbuttons fitem_fsubmit">
             <fieldset class="felement fsubmit">
-                <input id="id_submitbutton" type="submit" name="submit" value="<?php
+                <input id="id_submitbutton" type="submit" name="submit" class="btn btn-primary" value="<?php
                         print_string('save', 'quiz'); ?>"/>
             </fieldset>
         </div>

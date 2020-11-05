@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * mod_wiki page created event.
+ * The mod_wiki page created event.
  *
  * @package    mod_wiki
  * @copyright  2013 Rajesh Taneja <rajesh@moodle.com>
@@ -26,9 +26,10 @@ namespace mod_wiki\event;
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * mod_wiki page created event class.
+ * The mod_wiki page created event class.
  *
  * @package    mod_wiki
+ * @since      Moodle 2.7
  * @copyright  2013 Rajesh Taneja <rajesh@moodle.com>
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -59,7 +60,8 @@ class page_created extends \core\event\base {
      * @return string
      */
     public function get_description() {
-        return 'User with id ' . $this->userid . ' created wiki page id ' . $this->objectid;
+        return "The user with id '$this->userid' created the page with id '$this->objectid' for the wiki with " .
+            "course module id '$this->contextinstanceid'.";
     }
 
     /**
@@ -79,5 +81,9 @@ class page_created extends \core\event\base {
      */
     public function get_url() {
         return new \moodle_url('/mod/wiki/view.php', array('pageid' => $this->objectid));
+    }
+
+    public static function get_objectid_mapping() {
+        return array('db' => 'wiki_pages', 'restore' => 'wiki_page');
     }
 }

@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * This file contains an event for when a feedback activity is viewed.
+ * The mod_feedback course module viewed event.
  *
  * @package    mod_feedback
  * @copyright  2013 Ankit Agarwal
@@ -26,16 +26,16 @@ namespace mod_feedback\event;
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Event for when a feedback activity is viewed.
+ * The mod_feedback course module viewed event class.
  *
  * @property-read array $other {
  *      Extra information about event.
  *
- *      @type int anonymous if feedback is anonymous.
- *      @type int cmid course module id.
+ *      - int anonymous if feedback is anonymous.
  * }
  *
  * @package    mod_feedback
+ * @since      Moodle 2.6
  * @copyright  2013 Ankit Agarwal
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
@@ -51,18 +51,44 @@ class course_module_viewed extends \core\event\course_module_viewed {
     }
 
     /**
+     * Creates an instance from feedback record
+     *
+     * @param stdClass $feedback
+     * @param cm_info|stdClass $cm
+     * @param stdClass $course
+     * @return course_module_viewed
+     */
+    public static function create_from_record($feedback, $cm, $course) {
+        $event = self::create(array(
+            'objectid' => $feedback->id,
+            'context' => \context_module::instance($cm->id),
+            'anonymous' => ($feedback->anonymous == FEEDBACK_ANONYMOUS_YES),
+            'other' => array(
+                'anonymous' => $feedback->anonymous // Deprecated.
+            )
+        ));
+        $event->add_record_snapshot('course_modules', $cm);
+        $event->add_record_snapshot('course', $course);
+        $event->add_record_snapshot('feedback', $feedback);
+        return $event;
+    }
+
+    /**
      * Define whether a user can view the event or not. Make sure no one except admin can see details of an anonymous response.
+     *
+     * @deprecated since 2.7
      *
      * @param int|\stdClass $userorid ID of the user.
      * @return bool True if the user can view the event, false otherwise.
      */
     public function can_view($userorid = null) {
         global $USER;
+        debugging('can_view() method is deprecated, use anonymous flag instead if necessary.', DEBUG_DEVELOPER);
 
         if (empty($userorid)) {
             $userorid = $USER;
         }
-        if ($this->other['anonymous'] == FEEDBACK_ANONYMOUS_YES) {
+        if ($this->anonymous) {
             return is_siteadmin($userorid);
         } else {
             return has_capability('mod/feedback:viewreports', $this->context, $userorid);
@@ -76,7 +102,7 @@ class course_module_viewed extends \core\event\course_module_viewed {
      * @return array of parameters to be passed to legacy add_to_log() function.
      */
     protected function get_legacy_logdata() {
-        if ($this->other['anonymous'] == FEEDBACK_ANONYMOUS_YES) {
+        if ($this->anonymous) {
             return null;
         } else {
             return parent::get_legacy_logdata();
@@ -89,12 +115,20 @@ class course_module_viewed extends \core\event\course_module_viewed {
      * @throws \coding_exception in case of any problems.
      */
     protected function validate_data() {
-        if (!isset($this->other['anonymous'])) {
-            throw new \coding_exception("Field other['anonymous'] cannot be empty");
-        }
-
-        // Call parent validations.
         parent::validate_data();
+
+        if (!isset($this->other['anonymous'])) {
+            throw new \coding_exception('The \'anonymous\' value must be set in other.');
+        }
+    }
+
+    public static function get_objectid_mapping() {
+        return array('db' => 'feedback', 'restore' => 'feedback');
+    }
+
+    public static function get_other_mapping() {
+        // No need to map the 'anonymous' flag.
+        return false;
     }
 }
 

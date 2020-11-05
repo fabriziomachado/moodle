@@ -14,18 +14,18 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Class representing a users quick comment.
+ * Provides an in browser PDF editor.
  *
  * @module moodle-assignfeedback_editpdf-editor
  */
 
 /**
- * QUICKCOMMENT
+ * Class representing a users quick comment.
  *
  * @namespace M.assignfeedback_editpdf
  * @class quickcomment
  */
-QUICKCOMMENT = function(id, rawtext, width, colour) {
+var QUICKCOMMENT = function(id, rawtext, width, colour) {
 
     /**
      * Quick comment text.

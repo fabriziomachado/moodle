@@ -47,6 +47,11 @@ class mod_forum_generator extends testing_module_generator {
     protected $forumpostcount = 0;
 
     /**
+     * @var int keep track of how many forum subscriptions have been created.
+     */
+    protected $forumsubscriptionscount = 0;
+
+    /**
      * To be called from data reset code only,
      * do not use in tests.
      * @return void
@@ -54,6 +59,7 @@ class mod_forum_generator extends testing_module_generator {
     public function reset() {
         $this->forumdiscussioncount = 0;
         $this->forumpostcount = 0;
+        $this->forumsubscriptionscount = 0;
 
         parent::reset();
     }
@@ -75,8 +81,45 @@ class mod_forum_generator extends testing_module_generator {
         if (!isset($record->forcesubscribe)) {
             $record->forcesubscribe = FORUM_CHOOSESUBSCRIBE;
         }
+        if (!isset($record->grade_forum)) {
+            $record->grade_forum = 0;
+        }
 
         return parent::create_instance($record, (array)$options);
+    }
+
+    /**
+     * Function to create a dummy subscription.
+     *
+     * @param array|stdClass $record
+     * @return stdClass the subscription object
+     */
+    public function create_subscription($record = null) {
+        global $DB;
+
+        // Increment the forum subscription count.
+        $this->forumsubscriptionscount++;
+
+        $record = (array)$record;
+
+        if (!isset($record['course'])) {
+            throw new coding_exception('course must be present in phpunit_util::create_subscription() $record');
+        }
+
+        if (!isset($record['forum'])) {
+            throw new coding_exception('forum must be present in phpunit_util::create_subscription() $record');
+        }
+
+        if (!isset($record['userid'])) {
+            throw new coding_exception('userid must be present in phpunit_util::create_subscription() $record');
+        }
+
+        $record = (object)$record;
+
+        // Add the subscription.
+        $record->id = $DB->insert_record('forum_subscriptions', $record);
+
+        return $record;
     }
 
     /**
@@ -145,10 +188,52 @@ class mod_forum_generator extends testing_module_generator {
             $record['mailnow'] = "0";
         }
 
+        if (isset($record['timemodified'])) {
+            $timemodified = $record['timemodified'];
+        }
+
+        if (!isset($record['pinned'])) {
+            $record['pinned'] = FORUM_DISCUSSION_UNPINNED;
+        }
+
+        if (!isset($record['timelocked'])) {
+            $record['timelocked'] = 0;
+        }
+
+        if (isset($record['mailed'])) {
+            $mailed = $record['mailed'];
+        }
+
         $record = (object) $record;
 
         // Add the discussion.
         $record->id = forum_add_discussion($record, null, null, $record->userid);
+
+        $post = $DB->get_record('forum_posts', array('discussion' => $record->id));
+
+        if (isset($timemodified) || isset($mailed)) {
+            if (isset($mailed)) {
+                $post->mailed = $mailed;
+            }
+
+            if (isset($timemodified)) {
+                // Enforce the time modified.
+                $record->timemodified = $timemodified;
+                $post->modified = $post->created = $timemodified;
+
+                $DB->update_record('forum_discussions', $record);
+            }
+
+            $DB->update_record('forum_posts', $post);
+        }
+
+        if (property_exists($record, 'tags')) {
+            $cm = get_coursemodule_from_instance('forum', $record->forum);
+            $tags = is_array($record->tags) ? $record->tags : preg_split('/,/', $record->tags);
+
+            core_tag_tag::set_item_tags('mod_forum', 'forum_posts', $post->id,
+                context_module::instance($cm->id), $tags);
+        }
 
         return $record;
     }
@@ -198,10 +283,52 @@ class mod_forum_generator extends testing_module_generator {
             $record['modified'] = $time;
         }
 
+        if (!isset($record['mailed'])) {
+            $record['mailed'] = 0;
+        }
+
+        if (!isset($record['messageformat'])) {
+            $record['messageformat'] = 0;
+        }
+
+        if (!isset($record['messagetrust'])) {
+            $record['messagetrust'] = 0;
+        }
+
+        if (!isset($record['attachment'])) {
+            $record['attachment'] = "";
+        }
+
+        if (!isset($record['totalscore'])) {
+            $record['totalscore'] = 0;
+        }
+
+        if (!isset($record['mailnow'])) {
+            $record['mailnow'] = 0;
+        }
+
+        if (!isset($record['deleted'])) {
+            $record['deleted'] = 0;
+        }
+
+        if (!isset($record['privatereplyto'])) {
+            $record['privatereplyto'] = 0;
+        }
+
         $record = (object) $record;
+        \mod_forum\local\entities\post::add_message_counts($record);
 
         // Add the post.
         $record->id = $DB->insert_record('forum_posts', $record);
+
+        if (property_exists($record, 'tags')) {
+            $discussion = $DB->get_record('forum_discussions', ['id' => $record->discussion]);
+            $cm = get_coursemodule_from_instance('forum', $discussion->forum);
+            $tags = is_array($record->tags) ? $record->tags : preg_split('/,/', $record->tags);
+
+            core_tag_tag::set_item_tags('mod_forum', 'forum_posts', $record->id,
+                context_module::instance($cm->id), $tags);
+        }
 
         // Update the last post.
         forum_discussion_update_last_post($record->discussion);
@@ -230,5 +357,22 @@ class mod_forum_generator extends testing_module_generator {
             $post = $this->create_post($record);
         }
         return $post;
+    }
+
+    /**
+     * Extracted from exporter/post.php
+     *
+     * Get the HTML to display as a subheading in a post.
+     *
+     * @param stdClass $exportedauthor The exported author object
+     * @param int $timecreated The post time created timestamp if it's to be displayed
+     * @return string
+     */
+    public function get_author_subheading_html(stdClass $exportedauthor, int $timecreated) : string {
+        $fullname = $exportedauthor->fullname;
+        $profileurl = $exportedauthor->urls['profile'] ?? null;
+        $name = $profileurl ? "<a href=\"{$profileurl}\">{$fullname}</a>" : $fullname;
+        $date = userdate_htmltime($timecreated, get_string('strftimedaydatetime', 'core_langconfig'));
+        return get_string('bynameondate', 'mod_forum', ['name' => $name, 'date' => $date]);
     }
 }

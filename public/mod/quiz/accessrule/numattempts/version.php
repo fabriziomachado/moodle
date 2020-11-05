@@ -27,6 +27,6 @@
 defined('MOODLE_INTERNAL') || die();
 
 
-$plugin->version   = 2013110500;
-$plugin->requires  = 2013110500;
+$plugin->version   = 2020061500;
+$plugin->requires  = 2020060900;
 $plugin->component = 'quizaccess_numattempts';

@@ -121,10 +121,10 @@ abstract class question_edit_form extends question_wizard_form {
      * override this method and remove the ones you don't want with $mform->removeElement().
      */
     protected function definition() {
-        global $COURSE, $CFG, $DB;
+        global $COURSE, $CFG, $DB, $PAGE;
 
         $qtype = $this->qtype();
-        $langfile = "qtype_$qtype";
+        $langfile = "qtype_{$qtype}";
 
         $mform = $this->_form;
 
@@ -146,6 +146,9 @@ abstract class question_edit_form extends question_wizard_form {
             // Editing question with no permission to move from category.
             $mform->addElement('questioncategory', 'category', get_string('category', 'question'),
                     array('contexts' => array($this->categorycontext)));
+            $mform->addElement('hidden', 'usecurrentcat', 1);
+            $mform->setType('usecurrentcat', PARAM_BOOL);
+            $mform->setConstant('usecurrentcat', 1);
         } else {
             // Editing question with permission to move from category or save as new q.
             $currentgrp = array();
@@ -184,9 +187,8 @@ abstract class question_edit_form extends question_wizard_form {
         $mform->setType('questiontext', PARAM_RAW);
         $mform->addRule('questiontext', null, 'required', null, 'client');
 
-        $mform->addElement('text', 'defaultmark', get_string('defaultmark', 'question'),
+        $mform->addElement('float', 'defaultmark', get_string('defaultmark', 'question'),
                 array('size' => 7));
-        $mform->setType('defaultmark', PARAM_FLOAT);
         $mform->setDefault('defaultmark', 1);
         $mform->addRule('defaultmark', null, 'required', null, 'client');
 
@@ -195,12 +197,15 @@ abstract class question_edit_form extends question_wizard_form {
         $mform->setType('generalfeedback', PARAM_RAW);
         $mform->addHelpButton('generalfeedback', 'generalfeedback', 'question');
 
+        $mform->addElement('text', 'idnumber', get_string('idnumber', 'question'), 'maxlength="100"  size="10"');
+        $mform->addHelpButton('idnumber', 'idnumber', 'question');
+        $mform->setType('idnumber', PARAM_RAW);
+
         // Any questiontype specific fields.
         $this->definition_inner($mform);
 
-        if (!empty($CFG->usetags)) {
-            $mform->addElement('header', 'tagsheader', get_string('tags'));
-            $mform->addElement('tags', 'tags', get_string('tags'));
+        if (core_tag_tag::is_enabled('core_question', 'question')) {
+            $this->add_tag_fields($mform);
         }
 
         if (!empty($this->question->id)) {
@@ -236,21 +241,18 @@ abstract class question_edit_form extends question_wizard_form {
         $mform->setType('makecopy', PARAM_INT);
 
         $buttonarray = array();
-        if (!empty($this->question->id)) {
-            // Editing question.
-            if ($this->question->formoptions->canedit) {
-                $buttonarray[] = $mform->createElement('submit', 'submitbutton',
-                        get_string('savechanges'));
-            }
-            $buttonarray[] = $mform->createElement('cancel');
-        } else {
-            // Adding new question.
-            $buttonarray[] = $mform->createElement('submit', 'submitbutton',
-                    get_string('savechanges'));
-            $buttonarray[] = $mform->createElement('cancel');
+        $buttonarray[] = $mform->createElement('submit', 'updatebutton',
+                             get_string('savechangesandcontinueediting', 'question'));
+        if ($this->can_preview()) {
+            $previewlink = $PAGE->get_renderer('core_question')->question_preview_link(
+                    $this->question->id, $this->context, true);
+            $buttonarray[] = $mform->createElement('static', 'previewlink', '', $previewlink);
         }
-        $mform->addGroup($buttonarray, 'buttonar', '', array(' '), false);
-        $mform->closeHeaderBefore('buttonar');
+
+        $mform->addGroup($buttonarray, 'updatebuttonar', '', array(' '), false);
+        $mform->closeHeaderBefore('updatebuttonar');
+
+        $this->add_action_buttons(true, get_string('savechanges'));
 
         if ((!empty($this->question->id)) && (!($this->question->formoptions->canedit ||
                 $this->question->formoptions->cansaveasnew))) {
@@ -265,6 +267,15 @@ abstract class question_edit_form extends question_wizard_form {
      */
     protected function definition_inner($mform) {
         // By default, do nothing.
+    }
+
+    /**
+     * Is the question being edited in a state where it can be previewed?
+     * @return bool whether to show the preview link.
+     */
+    protected function can_preview() {
+        return empty($this->question->beingcopied) && !empty($this->question->id) &&
+                $this->question->formoptions->canedit;
     }
 
     /**
@@ -293,6 +304,75 @@ abstract class question_edit_form extends question_wizard_form {
         $repeatedoptions['fraction']['default'] = 0;
         $answersoption = 'answers';
         return $repeated;
+    }
+
+    /**
+     * Add the tag and course tag fields to the mform.
+     *
+     * If the form is being built in a course context then add the field
+     * for course tags.
+     *
+     * If the question category doesn't belong to a course context or we
+     * aren't editing in a course context then add the tags element to allow
+     * tags to be added to the question category context.
+     *
+     * @param object $mform The form being built
+     */
+    protected function add_tag_fields($mform) {
+        global $CFG, $DB;
+
+        $hastagcapability = question_has_capability_on($this->question, 'tag');
+        // Is the question category in a course context?
+        $qcontext = $this->categorycontext;
+        $qcoursecontext = $qcontext->get_course_context(false);
+        $iscourseoractivityquestion = !empty($qcoursecontext);
+        // Is the current context we're editing in a course context?
+        $editingcontext = $this->contexts->lowest();
+        $editingcoursecontext = $editingcontext->get_course_context(false);
+        $iseditingcontextcourseoractivity = !empty($editingcoursecontext);
+
+        $mform->addElement('header', 'tagsheader', get_string('tags'));
+        $tags = \core_tag_tag::get_tags_by_area_in_contexts('core_question', 'question', $this->contexts->all());
+        $tagstrings = [];
+        foreach ($tags as $tag) {
+            $tagstrings[$tag->name] = $tag->name;
+        }
+
+        $showstandard = core_tag_area::get_showstandard('core_question', 'question');
+        if ($showstandard != core_tag_tag::HIDE_STANDARD) {
+            $namefield = empty($CFG->keeptagnamecase) ? 'name' : 'rawname';
+            $standardtags = $DB->get_records('tag',
+                    array('isstandard' => 1, 'tagcollid' => core_tag_area::get_collection('core', 'question')),
+                    $namefield, 'id,' . $namefield);
+            foreach ($standardtags as $standardtag) {
+                $tagstrings[$standardtag->$namefield] = $standardtag->$namefield;
+            }
+        }
+
+        $options = [
+            'tags' => true,
+            'multiple' => true,
+            'noselectionstring' => get_string('anytags', 'quiz'),
+        ];
+        $mform->addElement('autocomplete', 'tags',  get_string('tags'), $tagstrings, $options);
+
+        if (!$hastagcapability) {
+            $mform->hardFreeze('tags');
+        }
+
+        if ($iseditingcontextcourseoractivity && !$iscourseoractivityquestion) {
+            // If the question is being edited in a course or activity context
+            // and the question isn't a course or activity level question then
+            // allow course tags to be added to the course.
+            $coursetagheader = get_string('questionformtagheader', 'core_question',
+                $editingcoursecontext->get_context_name(true));
+            $mform->addElement('header', 'coursetagsheader', $coursetagheader);
+            $mform->addElement('autocomplete', 'coursetags',  get_string('tags'), $tagstrings, $options);
+
+            if (!$hastagcapability) {
+                $mform->hardFreeze('coursetags');
+            }
+        }
     }
 
     /**
@@ -412,7 +492,7 @@ abstract class question_edit_form extends question_wizard_form {
         }
         $penaltyoptions = array();
         foreach ($penalties as $penalty) {
-            $penaltyoptions["$penalty"] = (100 * $penalty) . '%';
+            $penaltyoptions["{$penalty}"] = (100 * $penalty) . '%';
         }
         $mform->addElement('select', 'penalty',
                 get_string('penaltyforeachincorrecttry', 'question'), $penaltyoptions);
@@ -554,7 +634,7 @@ abstract class question_edit_form extends question_wizard_form {
             // are using object notation here, so we will be setting
             // ->_defaultValues['fraction'][0]. That does not work, so we have
             // to unset ->_defaultValues['fraction[0]'].
-            unset($this->_form->_defaultValues["fraction[$key]"]);
+            unset($this->_form->_defaultValues["fraction[{$key}]"]);
 
             // Prepare the feedback editor to display files in draft area.
             $draftitemid = file_get_submitted_draft_itemid('feedback['.$key.']');
@@ -571,7 +651,66 @@ abstract class question_edit_form extends question_wizard_form {
             $question->feedback[$key]['format'] = $answer->feedbackformat;
             $key++;
         }
+
+        // Now process extra answer fields.
+        $extraanswerfields = question_bank::get_qtype($question->qtype)->extra_answer_fields();
+        if (is_array($extraanswerfields)) {
+            // Omit table name.
+            array_shift($extraanswerfields);
+            $question = $this->data_preprocessing_extra_answer_fields($question, $extraanswerfields);
+        }
+
         return $question;
+    }
+
+    /**
+     * Perform the necessary preprocessing for the extra answer fields.
+     *
+     * Questions that do something not trivial when editing extra answer fields
+     * will want to override this.
+     * @param object $question the data being passed to the form.
+     * @param array $extraanswerfields extra answer fields (without table name).
+     * @return object $question the modified data.
+     */
+    protected function data_preprocessing_extra_answer_fields($question, $extraanswerfields) {
+        // Setting $question->$field[$key] won't work in PHP, so we need set an array of answer values to $question->$field.
+        // As we may have several extra fields with data for several answers in each, we use an array of arrays.
+        // Index in $extrafieldsdata is an extra answer field name, value - array of it's data for each answer.
+        $extrafieldsdata = array();
+        // First, prepare an array if empty arrays for each extra answer fields data.
+        foreach ($extraanswerfields as $field) {
+            $extrafieldsdata[$field] = array();
+        }
+
+        // Fill arrays with data from $question->options->answers.
+        $key = 0;
+        foreach ($question->options->answers as $answer) {
+            foreach ($extraanswerfields as $field) {
+                // See hack comment in {@link data_preprocessing_answers()}.
+                unset($this->_form->_defaultValues["{$field}[{$key}]"]);
+                $extrafieldsdata[$field][$key] = $this->data_preprocessing_extra_answer_field($answer, $field);
+            }
+            $key++;
+        }
+
+        // Set this data in the $question object.
+        foreach ($extraanswerfields as $field) {
+            $question->$field = $extrafieldsdata[$field];
+        }
+        return $question;
+    }
+
+    /**
+     * Perfmorm preprocessing for particular extra answer field.
+     *
+     * Questions with non-trivial DB - form element relationship will
+     * want to override this.
+     * @param object $answer an answer object to get extra field from.
+     * @param string $field extra answer field name.
+     * @return field value to be set to the form.
+     */
+    protected function data_preprocessing_extra_answer_field($answer, $field) {
+        return $answer->$field;
     }
 
     /**
@@ -655,6 +794,8 @@ abstract class question_edit_form extends question_wizard_form {
     }
 
     public function validation($fromform, $files) {
+        global $DB;
+
         $errors = parent::validation($fromform, $files);
         if (empty($fromform['makecopy']) && isset($this->question->id)
                 && ($this->question->formoptions->canedit ||
@@ -663,9 +804,39 @@ abstract class question_edit_form extends question_wizard_form {
             $errors['currentgrp'] = get_string('nopermissionmove', 'question');
         }
 
+        // Category.
+        if (empty($fromform['category'])) {
+            // User has provided an invalid category.
+            $errors['category'] = get_string('required');
+        }
+
         // Default mark.
         if (array_key_exists('defaultmark', $fromform) && $fromform['defaultmark'] < 0) {
             $errors['defaultmark'] = get_string('defaultmarkmustbepositive', 'question');
+        }
+
+        // Can only have one idnumber per category.
+        if (strpos($fromform['category'], ',') !== false) {
+            list($category, $categorycontextid) = explode(',', $fromform['category']);
+        } else {
+            $category = $fromform['category'];
+        }
+        if (isset($fromform['idnumber']) && ((string) $fromform['idnumber'] !== '')) {
+            if (empty($fromform['usecurrentcat']) && !empty($fromform['categorymoveto'])) {
+                $categoryinfo = $fromform['categorymoveto'];
+            } else {
+                $categoryinfo = $fromform['category'];
+            }
+            list($categoryid, $notused) = explode(',', $categoryinfo);
+            $conditions = 'category = ? AND idnumber = ?';
+            $params = [$categoryid, $fromform['idnumber']];
+            if (!empty($this->question->id)) {
+                $conditions .= ' AND id <> ?';
+                $params[] = $this->question->id;
+            }
+            if ($DB->record_exists_select('question', $conditions, $params)) {
+                $errors['idnumber'] = get_string('idnumbertaken', 'error');
+            }
         }
 
         return $errors;

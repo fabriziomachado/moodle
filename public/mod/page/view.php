@@ -24,6 +24,7 @@
  */
 
 require('../../config.php');
+require_once($CFG->dirroot.'/mod/page/lib.php');
 require_once($CFG->dirroot.'/mod/page/locallib.php');
 require_once($CFG->libdir.'/completionlib.php');
 
@@ -50,20 +51,8 @@ require_course_login($course, true, $cm);
 $context = context_module::instance($cm->id);
 require_capability('mod/page:view', $context);
 
-// Trigger module viewed event.
-$event = \mod_page\event\course_module_viewed::create(array(
-   'objectid' => $page->id,
-   'context' => $context
-));
-$event->add_record_snapshot('course_modules', $cm);
-$event->add_record_snapshot('course', $course);
-$event->add_record_snapshot('page', $page);
-$event->trigger();
-
-// Update 'viewed' state if required by completion system
-require_once($CFG->libdir . '/completionlib.php');
-$completion = new completion_info($course);
-$completion->set_module_viewed($cm);
+// Completion and trigger events.
+page_view($page, $course, $cm, $context);
 
 $PAGE->set_url('/mod/page/view.php', array('id' => $cm->id));
 
@@ -79,7 +68,9 @@ if ($inpopup and $page->display == RESOURCELIB_DISPLAY_POPUP) {
     $PAGE->set_activity_record($page);
 }
 echo $OUTPUT->header();
-echo $OUTPUT->heading(format_string($page->name), 2);
+if (!isset($options['printheading']) || !empty($options['printheading'])) {
+    echo $OUTPUT->heading(format_string($page->name), 2);
+}
 
 if (!empty($options['printintro'])) {
     if (trim(strip_tags($page->intro))) {
@@ -97,7 +88,9 @@ $formatoptions->context = $context;
 $content = format_text($content, $page->contentformat, $formatoptions);
 echo $OUTPUT->box($content, "generalbox center clearfix");
 
-$strlastmodified = get_string("lastmodified");
-echo "<div class=\"modified\">$strlastmodified: ".userdate($page->timemodified)."</div>";
+if (!isset($options['printlastmodified']) || !empty($options['printlastmodified'])) {
+    $strlastmodified = get_string("lastmodified");
+    echo html_writer::div("$strlastmodified: " . userdate($page->timemodified), 'modified');
+}
 
 echo $OUTPUT->footer();

@@ -41,8 +41,11 @@ class mod_forum_observer {
         // Get user enrolment info from event.
         $cp = (object)$event->other['userenrolment'];
         if ($cp->lastenrol) {
-            $params = array('userid' => $cp->userid, 'courseid' => $cp->courseid);
-            $forumselect = "IN (SELECT f.id FROM {forum} f WHERE f.course = :courseid)";
+            if (!$forums = $DB->get_records('forum', array('course' => $cp->courseid), '', 'id')) {
+                return;
+            }
+            list($forumselect, $params) = $DB->get_in_or_equal(array_keys($forums), SQL_PARAMS_NAMED);
+            $params['userid'] = $cp->userid;
 
             $DB->delete_records_select('forum_digests', 'userid = :userid AND forum '.$forumselect, $params);
             $DB->delete_records_select('forum_subscriptions', 'userid = :userid AND forum '.$forumselect, $params);
@@ -72,7 +75,7 @@ class mod_forum_observer {
         require_once($CFG->dirroot . '/mod/forum/lib.php');
 
         $userid = $event->relateduserid;
-        $sql = "SELECT f.id, cm.id AS cmid
+        $sql = "SELECT f.id, f.course as course, cm.id AS cmid, f.forcesubscribe
                   FROM {forum} f
                   JOIN {course_modules} cm ON (cm.instance = f.id)
                   JOIN {modules} m ON (m.id = cm.module)
@@ -86,9 +89,64 @@ class mod_forum_observer {
         $forums = $DB->get_records_sql($sql, $params);
         foreach ($forums as $forum) {
             // If user doesn't have allowforcesubscribe capability then don't subscribe.
-            if (has_capability('mod/forum:allowforcesubscribe', context_module::instance($forum->cmid), $userid)) {
-                forum_subscribe($userid, $forum->id);
+            $modcontext = context_module::instance($forum->cmid);
+            if (has_capability('mod/forum:allowforcesubscribe', $modcontext, $userid)) {
+                \mod_forum\subscriptions::subscribe_user($userid, $forum, $modcontext);
             }
+        }
+    }
+
+    /**
+     * Observer for \core\event\course_module_created event.
+     *
+     * @param \core\event\course_module_created $event
+     * @return void
+     */
+    public static function course_module_created(\core\event\course_module_created $event) {
+        global $CFG;
+
+        if ($event->other['modulename'] === 'forum') {
+            // Include the forum library to make use of the forum_instance_created function.
+            require_once($CFG->dirroot . '/mod/forum/lib.php');
+
+            $forum = $event->get_record_snapshot('forum', $event->other['instanceid']);
+            forum_instance_created($event->get_context(), $forum);
+        }
+    }
+
+    /**
+     * Observer for \core\event\course_created event.
+     *
+     * @param \core\event\course_created $event
+     * @return void
+     */
+    public static function course_created(\core\event\course_created $event) {
+        global $CFG;
+
+        $course = $event->get_record_snapshot('course', $event->objectid);
+        $format = course_get_format($course);
+        if ($format->supports_news() && !empty($course->newsitems)) {
+            require_once($CFG->dirroot . '/mod/forum/lib.php');
+            // Auto create the announcements forum.
+            forum_get_course_forum($event->objectid, 'news');
+        }
+    }
+
+    /**
+     * Observer for \core\event\course_updated event.
+     *
+     * @param \core\event\course_updated $event
+     * @return void
+     */
+    public static function course_updated(\core\event\course_updated $event) {
+        global $CFG;
+
+        $course = $event->get_record_snapshot('course', $event->objectid);
+        $format = course_get_format($course);
+        if ($format->supports_news() && !empty($course->newsitems)) {
+            require_once($CFG->dirroot . '/mod/forum/lib.php');
+            // Auto create the announcements forum.
+            forum_get_course_forum($event->objectid, 'news');
         }
     }
 }

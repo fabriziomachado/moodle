@@ -23,8 +23,8 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(dirname(dirname(__FILE__))).'/config.php');
-require_once(dirname(__FILE__).'/locallib.php');
+require(__DIR__.'/../../config.php');
+require_once(__DIR__.'/locallib.php');
 
 $id         = required_param('id', PARAM_INT); // course_module ID
 $tool       = required_param('tool', PARAM_ALPHA);
@@ -38,9 +38,9 @@ $workshop = new workshop($workshop, $cm, $course);
 require_sesskey();
 
 $params = array(
-    'objectid' => $workshop->id,
     'context' => $workshop->context,
-    'courseid' => $course->id
+    'courseid' => $course->id,
+    'other' => array('workshopid' => $workshop->id)
 );
 
 switch ($tool) {
@@ -55,7 +55,7 @@ case 'clearaggregatedgrades':
 case 'clearassessments':
     require_capability('mod/workshop:overridegrades', $workshop->context);
     $workshop->clear_assessments();
-    $event = \mod_workshop\event\submission_assessments_reset::create($params);
+    $event = \mod_workshop\event\assessments_reset::create($params);
     $event->trigger();
     break;
 }

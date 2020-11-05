@@ -22,8 +22,8 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require(dirname(__FILE__).'/../../config.php');
-require_once(dirname(__FILE__).'/locallib.php');
+require(__DIR__.'/../../config.php');
+require_once(__DIR__.'/locallib.php');
 
 $id = required_param('id', PARAM_INT); // Course ID.
 
@@ -47,12 +47,7 @@ $PAGE->set_heading($course->fullname);
 $PAGE->navbar->add($strbooks);
 echo $OUTPUT->header();
 
-$params = array(
-    'context' => context_course::instance($course->id)
-);
-$event = \mod_book\event\course_module_instance_list_viewed::create($params);
-$event->add_record_snapshot('course', $course);
-$event->trigger();
+\mod_book\event\course_module_instance_list_viewed::create_from_course($course)->trigger();
 
 // Get all the appropriate data
 if (!$books = get_all_instances_in_course('book', $course)) {

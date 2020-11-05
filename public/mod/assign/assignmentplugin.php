@@ -42,7 +42,10 @@ abstract class assign_plugin {
     private $type = '';
     /** @var string $error error message */
     private $error = '';
-
+    /** @var boolean|null $enabledcache Cached lookup of the is_enabled function */
+    private $enabledcache = null;
+    /** @var boolean|null $enabledcache Cached lookup of the is_visible function */
+    private $visiblecache = null;
 
     /**
      * Constructor for the abstract plugin type class
@@ -203,6 +206,7 @@ abstract class assign_plugin {
      * @return bool
      */
     public final function enable() {
+        $this->enabledcache = true;
         return $this->set_config('enabled', 1);
     }
 
@@ -212,6 +216,7 @@ abstract class assign_plugin {
      * @return bool
      */
     public final function disable() {
+        $this->enabledcache = false;
         return $this->set_config('enabled', 0);
     }
 
@@ -221,7 +226,10 @@ abstract class assign_plugin {
      * @return bool - if false - this plugin will not accept submissions / feedback
      */
     public function is_enabled() {
-        return $this->get_config('enabled');
+        if ($this->enabledcache === null) {
+            $this->enabledcache = $this->get_config('enabled');
+        }
+        return $this->enabledcache;
     }
 
 
@@ -282,8 +290,11 @@ abstract class assign_plugin {
      * @return bool
      */
     public final function is_visible() {
-        $disabled = get_config($this->get_subtype() . '_' . $this->get_type(), 'disabled');
-        return !$disabled;
+        if ($this->visiblecache === null) {
+            $disabled = get_config($this->get_subtype() . '_' . $this->get_type(), 'disabled');
+            $this->visiblecache = !$disabled;
+        }
+        return $this->visiblecache;
     }
 
 
@@ -370,6 +381,16 @@ abstract class assign_plugin {
             }
         }
         return $config;
+    }
+
+    /**
+     * Get a list of file areas associated with the plugin configuration.
+     * This is used for backup/restore.
+     *
+     * @return array names of the fileareas, can be an empty array
+     */
+    public function get_config_file_areas() {
+        return array();
     }
 
     /**
@@ -559,17 +580,30 @@ abstract class assign_plugin {
     public function get_file_info($browser, $filearea, $itemid, $filepath, $filename) {
         global $CFG, $DB, $USER;
         $urlbase = $CFG->wwwroot.'/pluginfile.php';
-
+        $writeaccess = false;
         // Permission check on the itemid.
+        $assignment = $this->assignment;
 
         if ($this->get_subtype() == 'assignsubmission') {
             if ($itemid) {
-                $record = $DB->get_record('assign_submission', array('id'=>$itemid), 'userid', IGNORE_MISSING);
+                $record = $DB->get_record('assign_submission', array('id' => $itemid), 'userid,groupid', IGNORE_MISSING);
                 if (!$record) {
                     return null;
                 }
-                if (!$this->assignment->can_view_submission($record->userid)) {
-                    return null;
+                if (!empty($record->userid)) {
+                    if (!$assignment->can_view_submission($record->userid)) {
+                        return null;
+                    }
+
+                    // We only report write access for teachers.
+                    $writeaccess = $assignment->can_grade() && $assignment->can_edit_submission($record->userid);
+                } else {
+                    // Must be a team submission with a group.
+                    if (!$assignment->can_view_group_submission($record->groupid)) {
+                        return null;
+                    }
+                    // We only report write access for teachers.
+                    $writeaccess = $assignment->can_grade() && $assignment->can_edit_group_submission($record->groupid);
                 }
             }
         } else {
@@ -580,7 +614,7 @@ abstract class assign_plugin {
         $fs = get_file_storage();
         $filepath = is_null($filepath) ? '/' : $filepath;
         $filename = is_null($filename) ? '.' : $filename;
-        if (!($storedfile = $fs->get_file($this->assignment->get_context()->id,
+        if (!($storedfile = $fs->get_file($assignment->get_context()->id,
                                           $this->get_subtype() . '_' . $this->get_type(),
                                           $filearea,
                                           $itemid,
@@ -588,14 +622,15 @@ abstract class assign_plugin {
                                           $filename))) {
             return null;
         }
+
         return new file_info_stored($browser,
-                                    $this->assignment->get_context(),
+                                    $assignment->get_context(),
                                     $storedfile,
                                     $urlbase,
                                     $filearea,
                                     $itemid,
                                     true,
-                                    true,
+                                    $writeaccess,
                                     false);
     }
 
@@ -614,6 +649,16 @@ abstract class assign_plugin {
      * @return string
      */
     public function view_page($action) {
+        return '';
+    }
+
+    /**
+     * This allows a plugin to render an introductory section which is displayed
+     * right below the activity's "intro" section on the main assignment page.
+     *
+     * @return string
+     */
+    public function view_header() {
         return '';
     }
 
@@ -645,5 +690,16 @@ abstract class assign_plugin {
      */
     public function is_configurable() {
         return true;
+    }
+
+    /**
+     * Return the plugin configs for external functions,
+     * in some cases the configs will need formatting or be returned only if the current user has some capabilities enabled.
+     *
+     * @return array the list of settings
+     * @since Moodle 3.2
+     */
+    public function get_config_for_external() {
+        return array();
     }
 }

@@ -15,7 +15,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Event to be triggered when a feedback response is submitted.
+ * The mod_feedback response submitted event.
  *
  * @package    mod_feedback
  * @copyright  2013 Ankit Agarwal
@@ -26,19 +26,20 @@ namespace mod_feedback\event;
 defined('MOODLE_INTERNAL') || die();
 
 /**
- * Class response_submitted
+ * The mod_feedback response submitted event class.
  *
- * Class for event to be triggered when a feedback response is submitted.
+ * This event is triggered when a feedback response is submitted.
  *
  * @property-read array $other {
  *      Extra information about event.
  *
- *      @type int anonymous if feedback is anonymous.
- *      @type int cmid course module id.
- *      @type int instanceid id of instance.
+ *      - int anonymous: if feedback is anonymous.
+ *      - int cmid: course module id.
+ *      - int instanceid: id of instance.
  * }
  *
  * @package    mod_feedback
+ * @since      Moodle 2.6
  * @copyright  2013 Ankit Agarwal
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later.
  */
@@ -57,6 +58,29 @@ class response_submitted extends \core\event\base {
     }
 
     /**
+     * Creates an instance from the record from db table feedback_completed
+     *
+     * @param stdClass $completed
+     * @param stdClass|cm_info $cm
+     * @return self
+     */
+    public static function create_from_record($completed, $cm) {
+        $event = self::create(array(
+            'relateduserid' => $completed->userid,
+            'objectid' => $completed->id,
+            'context' => \context_module::instance($cm->id),
+            'anonymous' => ($completed->anonymous_response == FEEDBACK_ANONYMOUS_YES),
+            'other' => array(
+                'cmid' => $cm->id,
+                'instanceid' => $completed->feedback,
+                'anonymous' => $completed->anonymous_response // Deprecated.
+            )
+        ));
+        $event->add_record_snapshot('feedback_completed', $completed);
+        return $event;
+    }
+
+    /**
      * Returns localised general event name.
      *
      * @return string
@@ -71,7 +95,8 @@ class response_submitted extends \core\event\base {
      * @return string
      */
     public function get_description() {
-        return 'The user ' . $this->relateduserid . ' submited a feedback';
+        return "The user with id '$this->userid' submitted response for 'feedback' activity with "
+                . "course module id '$this->contextinstanceid'.";
     }
 
     /**
@@ -79,12 +104,12 @@ class response_submitted extends \core\event\base {
      * @return \moodle_url
      */
     public function get_url() {
-        if ($this->other['anonymous'] == FEEDBACK_ANONYMOUS_YES) {
-            return new \moodle_url('/mod/feedback/show_entries.php' , array('id' => $this->other['cmid'],
-                    'do_show' => 'showoneentry' , 'userid' => $this->relateduserid));
+        if ($this->anonymous) {
+            return new \moodle_url('/mod/feedback/show_entries.php', array('id' => $this->other['cmid'],
+                    'showcompleted' => $this->objectid));
         } else {
-            return new \moodle_url('/mod/feedback/show_entries_anonym.php', array('id' => $this->other['cmid'],
-                    'do_show' => 'showoneentry', 'showall' => 1, 'showcompleted' => $this->objectid));
+            return new \moodle_url('/mod/feedback/show_entries.php' , array('id' => $this->other['cmid'],
+                    'userid' => $this->userid, 'showcompleted' => $this->objectid));
         }
     }
 
@@ -95,7 +120,7 @@ class response_submitted extends \core\event\base {
      * @return array of parameters to be passed to legacy add_to_log() function.
      */
     protected function get_legacy_logdata() {
-        if ($this->other['anonymous'] == FEEDBACK_ANONYMOUS_YES) {
+        if ($this->anonymous) {
             return null;
         } else {
             return array($this->courseid, 'feedback', 'submit', 'view.php?id=' . $this->other['cmid'],
@@ -106,16 +131,19 @@ class response_submitted extends \core\event\base {
     /**
      * Define whether a user can view the event or not. Make sure no one except admin can see details of an anonymous response.
      *
+     * @deprecated since 2.7
+     *
      * @param int|\stdClass $userorid ID of the user.
      * @return bool True if the user can view the event, false otherwise.
      */
     public function can_view($userorid = null) {
         global $USER;
+        debugging('can_view() method is deprecated, use anonymous flag instead if necessary.', DEBUG_DEVELOPER);
 
         if (empty($userorid)) {
             $userorid = $USER;
         }
-        if ($this->other['anonymous'] == FEEDBACK_ANONYMOUS_YES) {
+        if ($this->anonymous) {
             return is_siteadmin($userorid);
         } else {
             return has_capability('mod/feedback:viewreports', $this->context, $userorid);
@@ -128,15 +156,32 @@ class response_submitted extends \core\event\base {
      * @throws \coding_exception in case of any problems.
      */
     protected function validate_data() {
+        parent::validate_data();
+
+        if (!isset($this->relateduserid)) {
+            throw new \coding_exception('The \'relateduserid\' must be set.');
+        }
         if (!isset($this->other['anonymous'])) {
-            throw new \coding_exception("Field other['anonymous'] cannot be empty");
+            throw new \coding_exception('The \'anonymous\' value must be set in other.');
         }
         if (!isset($this->other['cmid'])) {
-            throw new \coding_exception("Field other['cmid'] cannot be empty");
+            throw new \coding_exception('The \'cmid\' value must be set in other.');
         }
         if (!isset($this->other['instanceid'])) {
-            throw new \coding_exception("Field other['instanceid'] cannot be empty");
+            throw new \coding_exception('The \'instanceid\' value must be set in other.');
         }
+    }
+
+    public static function get_objectid_mapping() {
+        return array('db' => 'feedback_completed', 'restore' => 'feedback_completed');
+    }
+
+    public static function get_other_mapping() {
+        $othermapped = array();
+        $othermapped['cmid'] = array('db' => 'course_modules', 'restore' => 'course_module');
+        $othermapped['instanceid'] = array('db' => 'feedback', 'restore' => 'feedback');
+
+        return $othermapped;
     }
 }
 

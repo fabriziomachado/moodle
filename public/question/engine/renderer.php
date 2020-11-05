@@ -41,6 +41,34 @@ class core_question_renderer extends plugin_renderer_base {
     }
 
     /**
+     * Render an icon, optionally with the word 'Preview' beside it, to preview
+     * a given question.
+     * @param int $questionid the id of the question to be previewed.
+     * @param context $context the context in which the preview is happening.
+     *      Must be a course or category context.
+     * @param bool $showlabel if true, show the word 'Preview' after the icon.
+     *      If false, just show the icon.
+     */
+    public function question_preview_link($questionid, context $context, $showlabel) {
+        if ($showlabel) {
+            $alt = '';
+            $label = get_string('preview');
+            $attributes = array();
+        } else {
+            $alt = get_string('preview');
+            $label = '';
+            $attributes = array('title' => $alt);
+        }
+
+        $image = $this->pix_icon('t/preview', $alt, '', array('class' => 'iconsmall'));
+        $link = question_preview_url($questionid, null, null, null, null, $context);
+        $action = new popup_action('click', $link, 'questionpreview',
+                question_preview_popup_params());
+
+        return $this->action_link($link, $image . $label, $action, $attributes);
+    }
+
+    /**
      * Generate the display of a question in a particular state, and with certain
      * display options. Normally you do not call this method directly. Intsead
      * you call {@link question_usage_by_activity::render_question()} which will
@@ -61,10 +89,10 @@ class core_question_renderer extends plugin_renderer_base {
 
         $output = '';
         $output .= html_writer::start_tag('div', array(
-            'id' => 'q' . $qa->get_slot(),
+            'id' => $qa->get_outer_question_div_unique_id(),
             'class' => implode(' ', array(
                 'que',
-                $qa->get_question()->qtype->name(),
+                $qa->get_question(false)->get_type_name(),
                 $qa->get_behaviour_name(),
                 $qa->get_state_class($options->correctness && $qa->has_marks()),
             ))
@@ -79,18 +107,18 @@ class core_question_renderer extends plugin_renderer_base {
         $output .= html_writer::tag('div',
                 $this->add_part_heading($qtoutput->formulation_heading(),
                     $this->formulation($qa, $behaviouroutput, $qtoutput, $options)),
-                array('class' => 'formulation'));
+                array('class' => 'formulation clearfix'));
         $output .= html_writer::nonempty_tag('div',
                 $this->add_part_heading(get_string('feedback', 'question'),
                     $this->outcome($qa, $behaviouroutput, $qtoutput, $options)),
-                array('class' => 'outcome'));
+                array('class' => 'outcome clearfix'));
         $output .= html_writer::nonempty_tag('div',
                 $this->add_part_heading(get_string('comments', 'question'),
                     $this->manual_comment($qa, $behaviouroutput, $qtoutput, $options)),
-                array('class' => 'comment'));
+                array('class' => 'comment clearfix'));
         $output .= html_writer::nonempty_tag('div',
                 $this->response_history($qa, $behaviouroutput, $qtoutput, $options),
-                array('class' => 'history'));
+                array('class' => 'history clearfix border p-2'));
 
         $output .= html_writer::end_tag('div');
         $output .= html_writer::end_tag('div');
@@ -128,15 +156,15 @@ class core_question_renderer extends plugin_renderer_base {
      * @return HTML fragment.
      */
     protected function number($number) {
+        if (trim($number) === '') {
+            return '';
+        }
         $numbertext = '';
-        if (is_numeric($number)) {
+        if (trim($number) === 'i') {
+            $numbertext = get_string('information', 'question');
+        } else {
             $numbertext = get_string('questionx', 'question',
                     html_writer::tag('span', $number, array('class' => 'qno')));
-        } else if ($number == 'i') {
-            $numbertext = get_string('information', 'question');
-        }
-        if (!$numbertext) {
-            return '';
         }
         return html_writer::tag('h3', $numbertext, array('class' => 'no'));
     }
@@ -295,21 +323,23 @@ class core_question_renderer extends plugin_renderer_base {
         if ($flagged) {
             $icon = 'i/flagged';
             $alt = get_string('flagged', 'question');
+            $label = get_string('clickunflag', 'question');
         } else {
             $icon = 'i/unflagged';
             $alt = get_string('notflagged', 'question');
+            $label = get_string('clickflag', 'question');
         }
         $attributes = array(
-            'src' => $this->pix_url($icon),
+            'src' => $this->image_url($icon),
             'alt' => $alt,
+            'class' => 'questionflagimage',
         );
         if ($id) {
             $attributes['id'] = $id;
         }
         $img = html_writer::empty_tag('img', $attributes);
-        if ($flagged) {
-            $img .= ' ' . get_string('flagged', 'question');
-        }
+        $img .= html_writer::span($label);
+
         return $img;
     }
 
@@ -325,7 +355,7 @@ class core_question_renderer extends plugin_renderer_base {
         if ($params['returnurl'] instanceof moodle_url) {
             $params['returnurl'] = $params['returnurl']->out_as_local_url(false);
         }
-        $params['id'] = $qa->get_question()->id;
+        $params['id'] = $qa->get_question_id();
         $editurl = new moodle_url('/question/question.php', $params);
 
         return html_writer::tag('div', html_writer::link(
@@ -383,6 +413,8 @@ class core_question_renderer extends plugin_renderer_base {
                 $qtoutput->feedback($qa, $options), array('class' => 'feedback'));
         $output .= html_writer::nonempty_tag('div',
                 $behaviouroutput->feedback($qa, $options), array('class' => 'im-feedback'));
+        $output .= html_writer::nonempty_tag('div',
+                $options->extrainfocontent, array('class' => 'extra-feedback'));
         return $output;
     }
 
@@ -457,8 +489,10 @@ class core_question_renderer extends plugin_renderer_base {
         }
 
         return html_writer::tag('h4', get_string('responsehistory', 'question'),
-                array('class' => 'responsehistoryheader')) . html_writer::tag('div',
-                html_writer::table($table, true), array('class' => 'responsehistoryheader'));
+                        array('class' => 'responsehistoryheader')) .
+                $options->extrahistorycontent .
+                html_writer::tag('div', html_writer::table($table, true),
+                        array('class' => 'responsehistoryheader'));
     }
 
 }

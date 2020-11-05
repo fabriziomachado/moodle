@@ -5,46 +5,65 @@ Feature: A teacher can delete questions in the question bank
   I need to delete questions
 
   Background:
-    Given the following "users" exists:
+    Given the following "users" exist:
       | username | firstname | lastname | email |
-      | teacher1 | Teacher | 1 | teacher1@asd.com |
-    And the following "courses" exists:
+      | teacher1 | Teacher | 1 | teacher1@example.com |
+    And the following "courses" exist:
       | fullname | shortname | format |
       | Course 1 | C1 | weeks |
-    And the following "course enrolments" exists:
+    And the following "course enrolments" exist:
       | user | course | role |
       | teacher1 | C1 | editingteacher |
+    And the following "question categories" exist:
+      | contextlevel | reference | name           |
+      | Course       | C1        | Test questions |
+    And the following "questions" exist:
+      | questioncategory | qtype | name                        | questiontext                  |
+      | Test questions   | essay | Test question to be deleted | Write about whatever you want |
     And I log in as "teacher1"
-    And I follow "Course 1"
-    And I add a "Essay" question filling the form with:
-      | Question name | Test question to be deleted |
-      | Question text | Write about whatever you want |
-    And I follow "Course 1"
+    And I am on "Course 1" course homepage
+    And I navigate to "Question bank > Questions" in current page administration
 
   @javascript
-  Scenario: Delete a question not used in a quiz
-    Given I follow "Question bank"
-    And I click on "Delete" "link" in the "Test question to be deleted" "table_row"
-    When I press "Continue"
+  Scenario: A question not used anywhere can really be deleted
+    When I choose "Delete" action for "Test question to be deleted" in the question bank
+    And I press "Delete"
+    And I click on "Also show old questions" "checkbox"
     Then I should not see "Test question to be deleted"
+
+  @javascript
+  Scenario: Deleting a question can be cancelled
+    When I choose "Delete" action for "Test question to be deleted" in the question bank
+    And I press "Cancel"
+    Then I should see "Test question to be deleted"
 
   @javascript
   Scenario: Delete a question used in a quiz
-    Given I turn editing mode on
+    Given I am on "Course 1" course homepage with editing mode on
     And I add a "Quiz" to section "1" and I fill the form with:
       | Name | Test quiz |
-    And I follow "Test quiz"
-    And I follow "Edit quiz"
-    And I follow "Show"
-    And I click on "Add to quiz" "link" in the "Test question to be deleted" "table_row"
-    And I follow "Course 1"
-    And I follow "Question bank"
-    And I click on "Delete" "link" in the "Test question to be deleted" "table_row"
-    When I press "Continue"
-    Then I should not see "Test question to be deleted"
+    And I add a "True/False" question to the "Test quiz" quiz with:
+      | Question name | Test used question to be deleted |
+      | Question text | Write about whatever you want    |
+    And I am on "Course 1" course homepage
+    And I navigate to "Question bank > Questions" in current page administration
+    When I choose "Delete" action for "Test used question to be deleted" in the question bank
+    And I press "Delete"
+    Then I should not see "Test used question to be deleted"
     And I click on "Also show old questions" "checkbox"
-    And I should see "Test question to be deleted"
-    And I follow "Course 1"
+    And I should see "Test used question to be deleted"
+    And I am on "Course 1" course homepage
     And I follow "Test quiz"
     And I click on "Preview quiz now" "button"
     And I should see "Write about whatever you want"
+
+  @javascript
+  Scenario: A question can be deleted even if that question type is no longer installed
+    Given the following "questions" exist:
+      | questioncategory | qtype       | name            | questiontext    |
+      | Test questions   | missingtype | Broken question | Write something |
+    And I reload the page
+    When I choose "Delete" action for "Broken question" in the question bank
+    And I press "Delete"
+    And I click on "Also show old questions" "checkbox"
+    Then I should not see "Broken question"

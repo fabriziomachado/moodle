@@ -14,13 +14,13 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Class representing a 2d rect.
+ * Provides an in browser PDF editor.
  *
  * @module moodle-assignfeedback_editpdf-editor
  */
 
 /**
- * RECT
+ * Class representing a 2d rect.
  *
  * @namespace M.assignfeedback_editpdf
  * @param int x
@@ -29,7 +29,7 @@
  * @param int height
  * @class rect
  */
-RECT = function(x, y, width, height) {
+var RECT = function(x, y, width, height) {
 
     /**
      * X coordinate.

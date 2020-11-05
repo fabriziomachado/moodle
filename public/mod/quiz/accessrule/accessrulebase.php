@@ -34,11 +34,12 @@ require_once($CFG->dirroot . '/mod/quiz/locallib.php');
  * want to say that access is allowed, or explain the reason why it is block.
  * Therefore instead of is_access_allowed(...) we have prevent_access(...) that
  * return false if access is permitted, or a string explanation (which is treated
- * as true) if access should be blocked. Slighly unnatural, but acutally the easist
+ * as true) if access should be blocked. Slighly unnatural, but actually the easiest
  * way to implement this.
  *
- * @copyright  2009 Tim Hunt
- * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @copyright 2009 Tim Hunt
+ * @license   http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ * @since     Moodle 2.2
  */
 abstract class quiz_access_rule_base {
     /** @var stdClass the quiz settings. */
@@ -281,9 +282,20 @@ abstract class quiz_access_rule_base {
      * Save any submitted settings when the quiz settings form is submitted. This
      * is called from {@link quiz_after_add_or_update()} in lib.php.
      * @param object $quiz the data from the quiz form, including $quiz->id
-     *      which is the is of the quiz being saved.
+     *      which is the id of the quiz being saved.
      */
     public static function save_settings($quiz) {
+        // By default do nothing.
+    }
+
+    /**
+     * Delete any rule-specific settings when the quiz is deleted. This is called
+     * from {@link quiz_delete_instance()} in lib.php.
+     * @param object $quiz the data from the database, including $quiz->id
+     *      which is the id of the quiz being deleted.
+     * @since Moodle 2.7.1, 2.6.4, 2.5.7
+     */
+    public static function delete_settings($quiz) {
         // By default do nothing.
     }
 

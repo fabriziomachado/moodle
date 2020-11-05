@@ -1,5 +1,4 @@
-<?PHP
-
+<?php
 // This file is part of Moodle - http://moodle.org/
 //
 // Moodle is free software: you can redistribute it and/or modify
@@ -72,11 +71,12 @@ function assignment_delete_instance($id){
         $result = false;
     }
 
+    grade_update('mod/assignment', $assignment->course, 'mod', 'assignment', $assignment->id, 0, NULL, array('deleted'=>1));
+
+    // We must delete the module record after we delete the grade item.
     if (! $DB->delete_records('assignment', array('id'=>$assignment->id))) {
         $result = false;
     }
-
-    grade_update('mod/assignment', $assignment->course, 'mod', 'assignment', $assignment->id, 0, NULL, array('deleted'=>1));
 
     return $result;
 }

@@ -6,12 +6,11 @@ Feature: Create folders in the file manager
 
   @javascript @_bug_phantomjs
   Scenario: Create folders and subfolders
-    Given the following "courses" exists:
+    Given the following "courses" exist:
       | fullname | shortname | category |
       | Course 1 | C1 | 0 |
     And I log in as "admin"
-    And I follow "Course 1"
-    And I turn editing mode on
+    And I am on "Course 1" course homepage with editing mode on
     And I add a "Folder" to section "0"
     And I set the following fields to these values:
       | Name | Folder resource |

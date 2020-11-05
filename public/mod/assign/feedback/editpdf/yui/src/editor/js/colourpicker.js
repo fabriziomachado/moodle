@@ -2,13 +2,19 @@ var COLOURPICKER_NAME = "Colourpicker",
     COLOURPICKER;
 
 /**
+ * Provides an in browser PDF editor.
+ *
+ * @module moodle-assignfeedback_editpdf-editor
+ */
+
+/**
  * COLOURPICKER
  * This is a drop down list of colours.
  *
- * @namespace M.assignfeedback_editpdf.colourpicker
- * @class dropdown
+ * @namespace M.assignfeedback_editpdf
+ * @class colourpicker
  * @constructor
- * @extends Y.Base
+ * @extends M.assignfeedback_editpdf.dropdown
  */
 COLOURPICKER = function(config) {
     COLOURPICKER.superclass.constructor.apply(this, [config]);
@@ -22,7 +28,7 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
      * @method initializer
      * @return void
      */
-    initializer : function(config) {
+    initializer: function(config) {
         var colourlist = Y.Node.create('<ul role="menu" class="assignfeedback_editpdf_menu"/>'),
             body;
 
@@ -57,7 +63,7 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
 
         COLOURPICKER.superclass.initializer.call(this, config);
     },
-    callback_handler : function(e) {
+    callback_handler: function(e) {
         e.preventDefault();
 
         var callback = this.get('callback'),
@@ -72,8 +78,8 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
         bind();
     }
 }, {
-    NAME : COLOURPICKER_NAME,
-    ATTRS : {
+    NAME: COLOURPICKER_NAME,
+    ATTRS: {
         /**
          * The list of colours this colour picker supports.
          *
@@ -81,8 +87,8 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
          * @type {String: String} (The keys of the array are the colour names and the values are localized strings)
          * @default {}
          */
-        colours : {
-            value : {}
+        colours: {
+            value: {}
         },
 
         /**
@@ -92,8 +98,8 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
          * @type function
          * @default null
          */
-        callback : {
-            value : null
+        callback: {
+            value: null
         },
 
         /**
@@ -103,8 +109,8 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
          * @type Y.Node
          * @default null
          */
-        context : {
-            value : null
+        context: {
+            value: null
         },
 
         /**
@@ -114,8 +120,8 @@ Y.extend(COLOURPICKER, M.assignfeedback_editpdf.dropdown, {
          * @type String
          * @default 'colour_'
          */
-        iconprefix : {
-            value : 'colour_'
+        iconprefix: {
+            value: 'colour_'
         }
     }
 });

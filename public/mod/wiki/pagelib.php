@@ -33,8 +33,9 @@
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
+defined('MOODLE_INTERNAL') || die();
+
 require_once($CFG->dirroot . '/mod/wiki/edit_form.php');
-require_once($CFG->dirroot . '/tag/lib.php');
 
 /**
  * Class page_wiki contains the common code between all pages
@@ -83,7 +84,7 @@ abstract class page_wiki {
      */
     protected $tabs_options = array();
     /**
-     * @var object wiki renderer
+     * @var mod_wiki_renderer wiki renderer
      */
     protected $wikioutput;
     /**
@@ -110,7 +111,10 @@ abstract class page_wiki {
         $PAGE->set_cm($cm);
         $PAGE->set_activity_record($wiki);
         // the search box
-        $PAGE->set_button(wiki_search_form($cm));
+        if (!empty($subwiki->id)) {
+            $search = optional_param('searchstring', null, PARAM_TEXT);
+            $PAGE->set_button(wiki_search_form($cm, $search, $subwiki));
+        }
     }
 
     /**
@@ -133,7 +137,7 @@ abstract class page_wiki {
 
         echo $OUTPUT->header();
         $wiki = $PAGE->activityrecord;
-        echo $OUTPUT->heading($wiki->name);
+        echo $OUTPUT->heading(format_string($wiki->name));
 
         echo $this->wikioutput->wiki_info();
 
@@ -378,7 +382,12 @@ class page_wiki_edit extends page_wiki {
     function __construct($wiki, $subwiki, $cm) {
         global $CFG, $PAGE;
         parent::__construct($wiki, $subwiki, $cm);
-        self::$attachmentoptions = array('subdirs' => false, 'maxfiles' => - 1, 'maxbytes' => $CFG->maxbytes, 'accepted_types' => '*');
+        $showfilemanager = false;
+        if (has_capability('mod/wiki:managefiles', context_module::instance($cm->id))) {
+            $showfilemanager = true;
+        }
+        self::$attachmentoptions = array('subdirs' => false, 'maxfiles' => - 1, 'maxbytes' => $CFG->maxbytes,
+                'accepted_types' => '*', 'enable_filemanagement' => $showfilemanager);
         $PAGE->requires->js_init_call('M.mod_wiki.renew_lock', null, true);
     }
 
@@ -488,7 +497,7 @@ class page_wiki_edit extends page_wiki {
 
                 $form = '<form method="post" action="' . $CFG->wwwroot . '/mod/wiki/overridelocks.php?' . $params . '">';
                 $form .= '<input type="hidden" name="sesskey" value="' . sesskey() . '" />';
-                $form .= '<input type="submit" value="' . get_string('overridelocks', 'wiki') . '" />';
+                $form .= '<input type="submit" class="btn btn-secondary" value="' . get_string('overridelocks', 'wiki') . '" />';
                 $form .= '</form>';
 
                 print $OUTPUT->box($form, 'generalbox boxwidthnormal boxaligncenter');
@@ -562,18 +571,9 @@ class page_wiki_edit extends page_wiki {
             $params['filearea']   = 'attachments';
         }
 
+        $data->tags = core_tag_tag::get_item_tags_array('mod_wiki', 'wiki_pages', $this->page->id);
+
         $form = new mod_wiki_edit_form($url, $params);
-
-        if ($formdata = $form->get_data()) {
-            if (!empty($CFG->usetags)) {
-                $data->tags = $formdata->tags;
-            }
-        } else {
-            if (!empty($CFG->usetags)) {
-                $data->tags = tag_get_tags_array('wiki_pages', $this->page->id);
-            }
-        }
-
         $form->set_data($data);
         $form->display();
     }
@@ -630,6 +630,7 @@ class page_wiki_comments extends page_wiki {
             $by->date = userdate($comment->timecreated);
 
             $t = new html_table();
+            $t->id = 'wiki-comments';
             $cell1 = new html_table_cell($OUTPUT->user_picture($user, array('popup' => true)));
             $cell2 = new html_table_cell(get_string('bynameondate', 'forum', $by));
             $cell3 = new html_table_cell();
@@ -659,21 +660,30 @@ class page_wiki_comments extends page_wiki {
 
             $t->data = array($row1, $row2);
 
-            $actionicons = false;
+            $canedit = $candelete = false;
+            if ((has_capability('mod/wiki:editcomment', $this->modcontext)) and ($USER->id == $user->id)) {
+                $candelete = $canedit = true;
+            }
             if ((has_capability('mod/wiki:managecomment', $this->modcontext))) {
-                $urledit = new moodle_url('/mod/wiki/editcomments.php', array('commentid' => $comment->id, 'pageid' => $page->id, 'action' => 'edit'));
-                $urldelet = new moodle_url('/mod/wiki/instancecomments.php', array('commentid' => $comment->id, 'pageid' => $page->id, 'action' => 'delete'));
-                $actionicons = true;
-            } else if ((has_capability('mod/wiki:editcomment', $this->modcontext)) and ($USER->id == $user->id)) {
-                $urledit = new moodle_url('/mod/wiki/editcomments.php', array('commentid' => $comment->id, 'pageid' => $page->id, 'action' => 'edit'));
-                $urldelet = new moodle_url('/mod/wiki/instancecomments.php', array('commentid' => $comment->id, 'pageid' => $page->id, 'action' => 'delete'));
-                $actionicons = true;
+                $candelete = true;
             }
 
-            if ($actionicons) {
-                $cell6 = new html_table_cell($OUTPUT->action_icon($urledit, new pix_icon('t/edit', get_string('edit'),
-                        '', array('class' => 'iconsmall'))) . $OUTPUT->action_icon($urldelet, new pix_icon('t/delete',
-                        get_string('delete'), '', array('class' => 'iconsmall'))));
+            $editicon = $deleteicon = '';
+            if ($canedit) {
+                $urledit = new moodle_url('/mod/wiki/editcomments.php', array('commentid' => $comment->id, 'pageid' => $page->id, 'action' => 'edit'));
+                $editicon = $OUTPUT->action_icon($urledit, new pix_icon('t/edit', get_string('edit'), '', array('class' => 'iconsmall')));
+            }
+            if ($candelete) {
+                $urldelete = new moodle_url('/mod/wiki/instancecomments.php', array('commentid' => $comment->id, 'pageid' => $page->id, 'action' => 'delete'));
+                $deleteicon = $OUTPUT->action_icon($urldelete,
+                                                  new pix_icon('t/delete',
+                                                               get_string('delete'),
+                                                               '',
+                                                               array('class' => 'iconsmall')));
+            }
+
+            if ($candelete || $canedit) {
+                $cell6 = new html_table_cell($editicon.$deleteicon);
                 $row3 = new html_table_row();
                 $row3->cells[] = $cell5;
                 $row3->cells[] = $cell6;
@@ -828,6 +838,17 @@ class page_wiki_search extends page_wiki {
         global $PAGE, $CFG;
         $PAGE->set_url($CFG->wwwroot . '/mod/wiki/search.php');
     }
+
+    function print_header() {
+        global $PAGE;
+
+        parent::print_header();
+
+        $wiki = $PAGE->activityrecord;
+        $page = (object)array('title' => $wiki->firstpagetitle);
+        $this->wikioutput->wiki_print_subwiki_selector($wiki, $this->subwiki, $page, 'search');
+    }
+
     function print_content() {
         global $PAGE;
 
@@ -894,7 +915,7 @@ class page_wiki_create extends page_wiki {
         global $PAGE;
         $this->action = $action;
 
-        require_once(dirname(__FILE__) . '/create_form.php');
+        require_once(__DIR__ . '/create_form.php');
         $url = new moodle_url('/mod/wiki/create.php', array('action' => 'create', 'wid' => $PAGE->activityrecord->id, 'group' => $this->gid, 'uid' => $this->uid));
         $formats = wiki_get_formats();
         $options = array('formats' => $formats, 'defaultformat' => $PAGE->activityrecord->defaultformat, 'forceformat' => $PAGE->activityrecord->forceformat, 'groups' => $this->groups);
@@ -958,14 +979,6 @@ class page_wiki_create extends page_wiki {
 class page_wiki_preview extends page_wiki_edit {
 
     private $newcontent;
-
-    function __construct($wiki, $subwiki, $cm) {
-        global $PAGE, $CFG, $OUTPUT;
-        parent::__construct($wiki, $subwiki, $cm);
-        $buttons = $OUTPUT->update_module_button($cm->id, 'wiki');
-        $PAGE->set_button($buttons);
-
-    }
 
     function print_header() {
         global $PAGE, $CFG;
@@ -1269,7 +1282,6 @@ class page_wiki_history extends page_wiki {
                 $table = new html_table();
                 $table->head = array('', get_string('version'), get_string('user'), get_string('modified'), '');
                 $table->data = $contents;
-                $table->attributes['class'] = 'mdl-align';
 
                 echo html_writer::table($table);
 
@@ -1301,15 +1313,15 @@ class page_wiki_history extends page_wiki {
 
                 $table->head = array(get_string('diff', 'wiki') . $icon, get_string('version'), get_string('user'), get_string('modified'), '');
                 $table->data = $contents;
-                $table->attributes['class'] = 'generaltable mdl-align';
+                $table->attributes['class'] = 'table generaltable';
                 $table->rowclasses = $rowclass;
 
                 // Print the form.
                 echo html_writer::start_tag('form', array('action'=>new moodle_url('/mod/wiki/diff.php'), 'method'=>'get', 'id'=>'diff'));
                 echo html_writer::tag('div', html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'pageid', 'value'=>$pageid)));
                 echo html_writer::table($table);
-                echo html_writer::start_tag('div', array('class'=>'mdl-align'));
-                echo html_writer::empty_tag('input', array('type'=>'submit', 'class'=>'wiki_form-button', 'value'=>get_string('comparesel', 'wiki')));
+                echo html_writer::start_tag('div');
+                echo html_writer::empty_tag('input', array('type'=>'submit', 'class'=>'wiki_form-button btn btn-secondary', 'value'=>get_string('comparesel', 'wiki')));
                 echo html_writer::end_tag('div');
                 echo html_writer::end_tag('form');
             }
@@ -1323,11 +1335,11 @@ class page_wiki_history extends page_wiki {
             //print_paging_bar($vcount, $paging, $rowsperpage,$CFG->wwwroot.'/mod/wiki/history.php?pageid='.$pageid.'&amp;','paging');
             } else {
             $link = new moodle_url('/mod/wiki/history.php', array('pageid' => $pageid));
-            $OUTPUT->container(html_writer::link($link->out(false), get_string('viewperpage', 'wiki', $this->rowsperpage)), 'mdl-align');
+            $OUTPUT->container(html_writer::link($link->out(false), get_string('viewperpage', 'wiki', $this->rowsperpage)));
         }
         if ($vcount > $this->rowsperpage && !$this->allversion) {
             $link = new moodle_url('/mod/wiki/history.php', array('pageid' => $pageid, 'allversion' => 1));
-            $OUTPUT->container(html_writer::link($link->out(false), get_string('viewallhistory', 'wiki')), 'mdl-align');
+            $OUTPUT->container(html_writer::link($link->out(false), get_string('viewallhistory', 'wiki')));
         }
     }
 
@@ -1425,14 +1437,11 @@ class page_wiki_map extends page_wiki {
             echo $this->wikioutput->menu_map($this->page->id, $this->view);
             $this->print_index_content();
             break;
-        case 5:
-            echo $this->wikioutput->menu_map($this->page->id, $this->view);
-            $this->print_page_list_content();
-            break;
         case 6:
             echo $this->wikioutput->menu_map($this->page->id, $this->view);
             $this->print_updated_content();
             break;
+        case 5:
         default:
             echo $this->wikioutput->menu_map($this->page->id, $this->view);
             $this->print_page_list_content();
@@ -1474,7 +1483,7 @@ class page_wiki_map extends page_wiki {
 
         $table = new html_table();
         $table->head = array(get_string('contributions', 'wiki') . $OUTPUT->help_icon('contributions', 'wiki'));
-        $table->attributes['class'] = 'wiki_editor generalbox';
+        $table->attributes['class'] = 'generalbox table';
         $table->data = array();
         $table->rowclasses = array();
 
@@ -1538,7 +1547,7 @@ class page_wiki_map extends page_wiki {
         $fromlinks = wiki_get_linked_from_pages($page->id);
 
         $table = new html_table();
-        $table->attributes['class'] = 'wiki_navigation_from';
+        $table->attributes['class'] = 'wiki_navigation_from table';
         $table->head = array(get_string('navigationfrom', 'wiki') . $OUTPUT->help_icon('navigationfrom', 'wiki') . ':');
         $table->data = array();
         $table->rowclasses = array();
@@ -1546,13 +1555,12 @@ class page_wiki_map extends page_wiki {
             $lpage = wiki_get_page($link->frompageid);
             $link = new moodle_url('/mod/wiki/view.php', array('pageid' => $lpage->id));
             $table->data[] = array(html_writer::link($link->out(false), format_string($lpage->title)));
-            $table->rowclasses[] = 'mdl-align';
         }
 
-        $table_left = html_writer::table($table);
+        $table_left = $OUTPUT->container(html_writer::table($table), 'col-md-6');
 
         $table = new html_table();
-        $table->attributes['class'] = 'wiki_navigation_to';
+        $table->attributes['class'] = 'wiki_navigation_to table';
         $table->head = array(get_string('navigationto', 'wiki') . $OUTPUT->help_icon('navigationto', 'wiki') . ':');
         $table->data = array();
         $table->rowclasses = array();
@@ -1565,10 +1573,9 @@ class page_wiki_map extends page_wiki {
                 $viewlink = new moodle_url('/mod/wiki/view.php', array('pageid' => $lpage->id));
                 $table->data[] = array(html_writer::link($viewlink->out(false), format_string($lpage->title)));
             }
-            $table->rowclasses[] = 'mdl-align';
         }
-        $table_right = html_writer::table($table);
-        echo $OUTPUT->container($table_left . $table_right, 'wiki_navigation_container');
+        $table_right = $OUTPUT->container(html_writer::table($table), 'col-md-6');
+        echo $OUTPUT->container($table_left . $table_right, 'wiki_navigation_container row');
     }
 
     /**
@@ -1594,7 +1601,7 @@ class page_wiki_map extends page_wiki {
 
         $table = new html_table();
         $table->head = array(get_string('pageindex', 'wiki') . $OUTPUT->help_icon('pageindex', 'wiki'));
-        $table->attributes['class'] = 'wiki_editor generalbox';
+        $table->attributes['class'] = 'generalbox table';
         $table->data[] = array($this->render_navigation_node($tree));
 
         echo html_writer::table($table);
@@ -1633,8 +1640,7 @@ class page_wiki_map extends page_wiki {
 
         $table = new html_table();
         $table->head = array(get_string('pagelist', 'wiki') . $OUTPUT->help_icon('pagelist', 'wiki'));
-        $table->attributes['class'] = 'wiki_editor generalbox';
-        $table->align = array('center');
+        $table->attributes['class'] = 'generalbox table';
         foreach ($stdaux as $key => $elem) {
             $table->data[] = array($key);
             foreach ($elem as $e) {
@@ -1663,7 +1669,7 @@ class page_wiki_map extends page_wiki {
 
         $table = new html_table();
         $table->head = array(get_string('orphaned', 'wiki') . $OUTPUT->help_icon('orphaned', 'wiki'));
-        $table->attributes['class'] = 'wiki_editor generalbox';
+        $table->attributes['class'] = 'generalbox table';
         $table->data = array();
         $table->rowclasses = array();
 
@@ -1699,7 +1705,7 @@ class page_wiki_map extends page_wiki {
 
         $table = new html_table();
         $table->head = array(get_string('updatedpages', 'wiki') . $OUTPUT->help_icon('updatedpages', 'wiki'));
-        $table->attributes['class'] = 'wiki_editor generalbox';
+        $table->attributes['class'] = 'generalbox table';
         $table->data = array();
         $table->rowclasses = array();
 
@@ -1834,11 +1840,15 @@ class page_wiki_restoreversion extends page_wiki {
     }
 
     function print_content() {
-        global $CFG, $PAGE;
+        global $PAGE;
 
-        require_capability('mod/wiki:managewiki', $this->modcontext, NULL, true, 'nomanagewikipermission', 'wiki');
+        $wiki = $PAGE->activityrecord;
+        if (wiki_user_can_edit($this->subwiki, $wiki)) {
+            $this->print_restoreversion();
+        } else {
+            echo get_string('cannoteditpage', 'wiki');
+        }
 
-        $this->print_restoreversion();
     }
 
     function set_url() {
@@ -1880,14 +1890,14 @@ class page_wiki_restoreversion extends page_wiki {
         $restoreurl = new moodle_url('/mod/wiki/restoreversion.php', $optionsyes);
         $return = new moodle_url('/mod/wiki/viewversion.php', array('pageid'=>$this->page->id, 'versionid'=>$version->id));
 
-        echo $OUTPUT->container_start('wiki-form-center');
+        echo $OUTPUT->container_start();
         echo html_writer::tag('div', get_string('restoreconfirm', 'wiki', $version->version));
         echo $OUTPUT->container_start(false, 'wiki_restoreform');
         echo '<form class="wiki_restore_yes" action="' . $restoreurl . '" method="post" id="restoreversion">';
-        echo '<div><input type="submit" name="confirm" value="' . get_string('yes') . '" /></div>';
+        echo '<div><input type="submit" class="btn btn-secondary" name="confirm" value="' . get_string('yes') . '" /></div>';
         echo '</form>';
         echo '<form class="wiki_restore_no" action="' . $return . '" method="post">';
-        echo '<div><input type="submit" name="norestore" value="' . get_string('no') . '" /></div>';
+        echo '<div><input type="submit" class="btn btn-secondary" name="norestore" value="' . get_string('no') . '" /></div>';
         echo '</form>';
         echo $OUTPUT->container_end();
         echo $OUTPUT->container_end();
@@ -1950,14 +1960,15 @@ class page_wiki_deletecomment extends page_wiki {
         $deleteurl = new moodle_url('/mod/wiki/instancecomments.php', $optionsyes);
         $return = new moodle_url('/mod/wiki/comments.php', array('pageid'=>$this->page->id));
 
-        echo $OUTPUT->container_start('wiki-form-center');
+        echo $OUTPUT->container_start();
         echo html_writer::tag('p', $strdeletecheckfull);
         echo $OUTPUT->container_start(false, 'wiki_deletecommentform');
         echo '<form class="wiki_deletecomment_yes" action="' . $deleteurl . '" method="post" id="deletecomment">';
-        echo '<div><input type="submit" name="confirmdeletecomment" value="' . get_string('yes') . '" /></div>';
+        echo '<div><input type="submit" class="btn btn-secondary" name="confirmdeletecomment" value="'
+            . get_string('yes') . '" /></div>';
         echo '</form>';
         echo '<form class="wiki_deletecomment_no" action="' . $return . '" method="post">';
-        echo '<div><input type="submit" name="norestore" value="' . get_string('no') . '" /></div>';
+        echo '<div><input type="submit" class="btn btn-secondary" name="norestore" value="' . get_string('no') . '" /></div>';
         echo '</form>';
         echo $OUTPUT->container_end();
         echo $OUTPUT->container_end();
@@ -2030,9 +2041,7 @@ class page_wiki_save extends page_wiki_edit {
         }
 
         if ($save && $data) {
-            if (!empty($CFG->usetags)) {
-                tag_set('wiki_pages', $this->page->id, $data->tags);
-            }
+            core_tag_tag::set_item_tags('mod_wiki', 'wiki_pages', $this->page->id, $this->modcontext, $data->tags);
 
             $message = '<p>' . get_string('saving', 'wiki') . '</p>';
 
@@ -2125,7 +2134,7 @@ class page_wiki_viewversion extends page_wiki {
             $viewlink = new moodle_url('/user/view.php', array('id' => $userinfo->id));
             $heading .= '&nbsp;&nbsp;&nbsp;<strong>' . get_string('user') . ':</strong>&nbsp;' . html_writer::link($viewlink->out(false), fullname($userinfo));
             $heading .= '&nbsp;&nbsp;&rarr;&nbsp;' . $OUTPUT->user_picture(wiki_get_user_info($pageversion->userid), array('popup' => true)) . '</p>';
-            echo $OUTPUT->container($heading, 'wiki_headingtime', 'mdl-align wiki_modifieduser');
+            echo $OUTPUT->container($heading, 'wiki_headingtime', 'wiki_modifieduser');
             $options = array('swid' => $this->subwiki->id, 'pretty_print' => true, 'pageid' => $this->page->id);
 
             $pageversion->content = file_rewrite_pluginfile_urls($pageversion->content, 'pluginfile.php', $this->modcontext->id, 'mod_wiki', 'attachments', $this->subwiki->id);
@@ -2149,13 +2158,17 @@ class page_wiki_confirmrestore extends page_wiki_save {
         $PAGE->set_url($CFG->wwwroot . '/mod/wiki/viewversion.php', array('pageid' => $this->page->id, 'versionid' => $this->version->id));
     }
 
+    function print_header() {
+        $this->set_url();
+    }
+
     function print_content() {
         global $CFG, $PAGE;
 
-        require_capability('mod/wiki:managewiki', $this->modcontext, NULL, true, 'nomanagewikipermission', 'wiki');
-
         $version = wiki_get_version($this->version->id);
-        if (wiki_restore_page($this->page, $version, $this->modcontext)) {
+        $wiki = $PAGE->activityrecord;
+        if (wiki_user_can_edit($this->subwiki, $wiki) &&
+                wiki_restore_page($this->page, $version, $this->modcontext)) {
             redirect($CFG->wwwroot . '/mod/wiki/view.php?pageid=' . $this->page->id, get_string('restoring', 'wiki', $version->version), 3);
         } else {
             print_error('restoreerror', 'wiki', $version->version);
@@ -2233,23 +2246,29 @@ class page_wiki_handlecomments extends page_wiki {
         global $CFG, $PAGE, $USER;
 
         if ($this->action == 'add') {
-            if (has_capability('mod/wiki:editcomment', $this->modcontext)) {
-                $this->add_comment($this->content, $this->commentid);
-            }
+            require_capability('mod/wiki:editcomment', $this->modcontext);
+            $this->add_comment($this->content, $this->commentid);
         } else if ($this->action == 'edit') {
+            require_capability('mod/wiki:editcomment', $this->modcontext);
+
             $comment = wiki_get_comment($this->commentid);
-            $edit = has_capability('mod/wiki:editcomment', $this->modcontext);
             $owner = ($comment->userid == $USER->id);
-            if ($owner && $edit) {
+
+            if ($owner) {
                 $this->add_comment($this->content, $this->commentid);
             }
         } else if ($this->action == 'delete') {
             $comment = wiki_get_comment($this->commentid);
+
             $manage = has_capability('mod/wiki:managecomment', $this->modcontext);
+            $edit = has_capability('mod/wiki:editcomment', $this->modcontext);
             $owner = ($comment->userid == $USER->id);
-            if ($owner || $manage) {
+
+            if ($manage || ($owner && $edit)) {
                 $this->delete_comment($this->commentid);
                 redirect($CFG->wwwroot . '/mod/wiki/comments.php?pageid=' . $this->page->id, get_string('deletecomment', 'wiki'), 2);
+            } else {
+                print_error('nopermissiontoeditcomment');
             }
         }
 
@@ -2487,7 +2506,7 @@ class page_wiki_admin extends page_wiki {
         $contents = array();
         $table = new html_table();
         $table->head = array('', get_string('pagename','wiki'));
-        $table->attributes['class'] = 'generaltable mdl-align';
+        $table->attributes['class'] = 'table generaltable';
         $swid = $this->subwiki->id;
         if ($showorphan) {
             if ($orphanedpages = wiki_get_orphaned_pages($swid)) {
@@ -2514,7 +2533,7 @@ class page_wiki_admin extends page_wiki {
 
         echo html_writer::empty_tag('input', array('type' => 'hidden', 'name' => 'option', 'value' => $this->view));
         echo html_writer::table($table);
-        echo html_writer::start_tag('div', array('class' => 'mdl-align'));
+        echo html_writer::start_tag('div');
         if (!$showorphan) {
             echo html_writer::empty_tag('input', array(
                                                      'type'    => 'submit',
@@ -2525,7 +2544,7 @@ class page_wiki_admin extends page_wiki {
             echo html_writer::empty_tag('input', array('type'=>'hidden', 'name'=>'listall', 'value'=>'1'));
             echo html_writer::empty_tag('input', array(
                                                      'type'    => 'submit',
-                                                     'class'   => 'wiki_form-button',
+                                                     'class'   => 'wiki_form-button btn btn-secondary',
                                                      'value'   => get_string('listall', 'wiki'),
                                                      'sesskey' => sesskey()));
         }
@@ -2607,7 +2626,6 @@ class page_wiki_admin extends page_wiki {
                 $table = new html_table();
                 $table->head = array('', get_string('version'), get_string('user'), get_string('modified'), '');
                 $table->data = $contents;
-                $table->attributes['class'] = 'mdl-align';
 
                 echo html_writer::table($table);
             } else {
@@ -2646,7 +2664,7 @@ class page_wiki_admin extends page_wiki {
                 $table = new html_table();
                 $table->head = array(get_string('deleteversions', 'wiki'), get_string('version'), get_string('user'), get_string('modified'), '');
                 $table->data = $contents;
-                $table->attributes['class'] = 'generaltable mdl-align';
+                $table->attributes['class'] = 'table generaltable';
                 $table->rowclasses = $rowclass;
 
                 ///Print the form
@@ -2655,8 +2673,8 @@ class page_wiki_admin extends page_wiki {
                 echo html_writer::empty_tag('input', array('type' => 'hidden', 'name' => 'option', 'value' => $this->view));
                 echo html_writer::empty_tag('input', array('type' => 'hidden', 'name' => 'sesskey', 'value' =>  sesskey()));
                 echo html_writer::table($table);
-                echo html_writer::start_tag('div', array('class' => 'mdl-align'));
-                echo html_writer::empty_tag('input', array('type' => 'submit', 'class' => 'wiki_form-button', 'value' => get_string('deleteversions', 'wiki')));
+                echo html_writer::start_tag('div');
+                echo html_writer::empty_tag('input', array('type' => 'submit', 'class' => 'wiki_form-button btn btn-secondary', 'value' => get_string('deleteversions', 'wiki')));
                 echo html_writer::end_tag('div');
                 echo html_writer::end_tag('form');
             }

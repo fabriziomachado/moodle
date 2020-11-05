@@ -39,8 +39,18 @@ class user_filter_profilefield extends user_filter_type {
      * @param string $label the label of the filter instance
      * @param boolean $advanced advanced form element flag
      */
+    public function __construct($name, $label, $advanced) {
+        parent::__construct($name, $label, $advanced);
+    }
+
+    /**
+     * Old syntax of class constructor. Deprecated in PHP7.
+     *
+     * @deprecated since Moodle 3.1
+     */
     public function user_filter_profilefield($name, $label, $advanced) {
-        parent::user_filter_type($name, $label, $advanced);
+        debugging('Use of class name as constructor is deprecated', DEBUG_DEVELOPER);
+        self::__construct($name, $label, $advanced);
     }
 
     /**
@@ -64,14 +74,13 @@ class user_filter_profilefield extends user_filter_type {
      */
     public function get_profile_fields() {
         global $DB;
-        if (!$fields = $DB->get_records('user_info_field', null, 'shortname', 'id,shortname')) {
+        $order = $DB->sql_order_by_text('name');
+        if (!$fields = $DB->get_records_menu('user_info_field', null, $order, 'id, name')) {
             return null;
         }
         $res = array(0 => get_string('anyfield', 'filters'));
-        foreach ($fields as $k => $v) {
-            $res[$k] = $v->shortname;
-        }
-        return $res;
+
+        return $res + $fields;
     }
 
     /**
@@ -84,9 +93,12 @@ class user_filter_profilefield extends user_filter_type {
             return;
         }
         $objs = array();
-        $objs[] = $mform->createElement('select', $this->_name.'_fld', null, $profilefields);
-        $objs[] = $mform->createElement('select', $this->_name.'_op', null, $this->get_operators());
-        $objs[] = $mform->createElement('text', $this->_name, null);
+        $objs['field'] = $mform->createElement('select', $this->_name.'_fld', null, $profilefields);
+        $objs['op'] = $mform->createElement('select', $this->_name.'_op', null, $this->get_operators());
+        $objs['value'] = $mform->createElement('text', $this->_name, null);
+        $objs['field']->setLabel(get_string('profilefilterfield', 'filters'));
+        $objs['op']->setLabel(get_string('profilefilterlimiter', 'filters'));
+        $objs['value']->setLabel(get_string('valuefor', 'filters', $this->_label));
         $grp =& $mform->addElement('group', $this->_name.'_grp', $this->_label, $objs, '', false);
         $mform->setType($this->_name, PARAM_RAW);
         if ($this->_advanced) {
@@ -110,7 +122,7 @@ class user_filter_profilefield extends user_filter_type {
         $operator = $field.'_op';
         $profile  = $field.'_fld';
 
-        if (array_key_exists($profile, $formdata)) {
+        if (property_exists($formdata, $profile)) {
             if ($formdata->$operator < 5 and $formdata->$field === '') {
                 return false;
             }

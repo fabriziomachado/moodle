@@ -47,7 +47,7 @@ class qformat_blackboard_six_base extends qformat_based_on_xml {
 
     /**
      * Check if the given file is capable of being imported by this plugin.
-     * As {@link file_storage::mimetype()} now uses finfo PHP extension if available,
+     * As {@link file_storage::mimetype()} may use finfo PHP extension if available,
      * the value returned by $file->get_mimetype for a .dat file is not the same on all servers.
      * So we must made 2 checks to verify if the plugin can import the file.
      * @param stored_file $file the file to check
@@ -134,7 +134,7 @@ class qformat_blackboard_six_base extends qformat_based_on_xml {
                 $dirpath = dirname($path);
                 $filename = basename($path);
                 $newfilename = $this->store_file_for_text_field($data, $this->filebase, $dirpath, $filename);
-                $text = preg_replace("|$path|", "@@PLUGINFILE@@/" . $newfilename, $text);
+                $text = preg_replace("|{$path}|", "@@PLUGINFILE@@/" . $newfilename, $text);
                 $filepaths[] = $path;
             }
 

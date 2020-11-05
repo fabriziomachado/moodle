@@ -14,7 +14,7 @@
 // along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
 
 /**
- * Class representing a partially completed edit operation.
+ * Provides an in browser PDF editor.
  *
  * @module moodle-assignfeedback_editpdf-editor
  */
@@ -25,7 +25,7 @@
  * @namespace M.assignfeedback_editpdf
  * @class edit
  */
-EDIT = function() {
+var EDIT = function() {
 
     /**
      * Starting point for the edit.
@@ -65,7 +65,7 @@ EDIT = function() {
      * @type String
      * @public
      */
-    this.tool = "comment";
+    this.tool = "drag";
 
     /**
      * The currently comment colour

@@ -234,6 +234,27 @@ class question_type {
     }
 
     /**
+     * Get extra actions for a question of this type to add to the question bank edit menu.
+     *
+     * This method is called if the {@link edit_menu_column} is being used in the
+     * question bank, which it is by default since Moodle 3.8. If applicable for
+     * your question type, you can return arn array of {@link action_menu_link}s.
+     * These will be added at the end of the Edit menu for this question.
+     *
+     * The $question object passed in will have a hard-to-predict set of fields,
+     * because the fields present depend on which columns are included in the
+     * question bank view. However, you can rely on 'id', 'createdby',
+     * 'contextid', 'hidden' and 'category' (id) being present, and so you
+     * can call question_has_capability_on without causing performance problems.
+     *
+     * @param stdClass $question the available information about the particular question the action is for.
+     * @return action_menu_link[] any actions you want to add to the Edit menu for this question.
+     */
+    public function get_extra_question_bank_actions(stdClass $question): array {
+        return [];
+    }
+
+    /**
      * This method should be overriden if you want to include a special heading or some other
      * html on a question editing page besides the question editing form.
      *
@@ -244,30 +265,7 @@ class question_type {
     public function display_question_editing_page($mform, $question, $wizardnow) {
         global $OUTPUT;
         $heading = $this->get_heading(empty($question->id));
-
         echo $OUTPUT->heading_with_help($heading, 'pluginname', $this->plugin_name());
-
-        $permissionstrs = array();
-        if (!empty($question->id)) {
-            if ($question->formoptions->canedit) {
-                $permissionstrs[] = get_string('permissionedit', 'question');
-            }
-            if ($question->formoptions->canmove) {
-                $permissionstrs[] = get_string('permissionmove', 'question');
-            }
-            if ($question->formoptions->cansaveasnew) {
-                $permissionstrs[] = get_string('permissionsaveasnew', 'question');
-            }
-        }
-        if (count($permissionstrs)) {
-            echo $OUTPUT->heading(get_string('permissionto', 'question'), 3);
-            $html = '<ul>';
-            foreach ($permissionstrs as $permissionstr) {
-                $html .= '<li>'.$permissionstr.'</li>';
-            }
-            $html .= '</ul>';
-            echo $OUTPUT->box($html, 'boxwidthnarrow boxaligncenter generalbox');
-        }
         $mform->display();
     }
 
@@ -325,7 +323,10 @@ class question_type {
      *       is accurate any more.)
      */
     public function save_question($question, $form) {
-        global $USER, $DB, $OUTPUT;
+        global $USER, $DB;
+
+        // The actual update/insert done with multiple DB access, so we do it in a transaction.
+        $transaction = $DB->start_delegated_transaction ();
 
         list($question->category) = explode(',', $form->category);
         $context = $this->get_context_by_category_id($question->category);
@@ -339,7 +340,10 @@ class question_type {
         $question->length = $this->actual_number_of_questions($question);
         $question->penalty = isset($form->penalty) ? $form->penalty : 0;
 
-        if (empty($form->questiontext['text'])) {
+        // The trim call below has the effect of casting any strange values received,
+        // like null or false, to an appropriate string, so we only need to test for
+        // missing values. Be careful not to break the value '0' here.
+        if (!isset($form->questiontext['text'])) {
             $question->questiontext = '';
         } else {
             $question->questiontext = trim($form->questiontext['text']);
@@ -355,9 +359,9 @@ class question_type {
         $question->generalfeedbackformat = !empty($form->generalfeedback['format']) ?
                 $form->generalfeedback['format'] : 0;
 
-        if (empty($question->name)) {
+        if ($question->name === '') {
             $question->name = shorten_text(strip_tags($form->questiontext['text']), 15);
-            if (empty($question->name)) {
+            if ($question->name === '') {
                 $question->name = '-';
             }
         }
@@ -370,13 +374,34 @@ class question_type {
             $question->defaultmark = $form->defaultmark;
         }
 
+        if (isset($form->idnumber)) {
+            if ((string) $form->idnumber === '') {
+                $question->idnumber = null;
+            } else {
+                // While this check already exists in the form validation,
+                // this is a backstop preventing unnecessary errors.
+                // Only set the idnumber if it has changed and will not cause a unique index violation.
+                if (strpos($form->category, ',') !== false) {
+                    list($category, $categorycontextid) = explode(',', $form->category);
+                } else {
+                    $category = $form->category;
+                }
+                if (!$DB->record_exists('question',
+                        ['idnumber' => $form->idnumber, 'category' => $category])) {
+                    $question->idnumber = $form->idnumber;
+                }
+            }
+        }
+
         // If the question is new, create it.
+        $newquestion = false;
         if (empty($question->id)) {
             // Set the unique code.
             $question->stamp = make_unique_id_code();
             $question->createdby = $USER->id;
             $question->timecreated = time();
             $question->id = $DB->insert_record('question', $question);
+            $newquestion = true;
         }
 
         // Now, whether we are updating a existing question, or creating a new
@@ -414,7 +439,7 @@ class question_type {
         }
 
         if (!empty($result->notice)) {
-            notice($result->notice, "question.php?id=$question->id");
+            notice($result->notice, "question.php?id={$question->id}");
         }
 
         if (!empty($result->noticeyesno)) {
@@ -426,6 +451,18 @@ class question_type {
         $DB->set_field('question', 'version', question_hash($question),
                 array('id' => $question->id));
 
+        if ($newquestion) {
+            // Log the creation of this question.
+            $event = \core\event\question_created::create_from_question_instance($question, $context);
+            $event->trigger();
+        } else {
+            // Log the update of this question.
+            $event = \core\event\question_updated::create_from_question_instance($question, $context);
+            $event->trigger();
+        }
+
+        $transaction->allow_commit();
+
         return $question;
     }
 
@@ -433,7 +470,7 @@ class question_type {
      * Saves question-type specific options
      *
      * This is called by {@link save_question()} to save the question-type specific data
-     * @return object $result->error or $result->noticeyesno or $result->notice
+     * @return object $result->error or $result->notice
      * @param object $question  This holds the information from the editing form,
      *      it is not a standard question object.
      */
@@ -461,9 +498,162 @@ class question_type {
 
             $DB->{$function}($question_extension_table, $options);
         }
+    }
 
+    /**
+     * Save the answers, with any extra data.
+     *
+     * Questions that use answers will call it from {@link save_question_options()}.
+     * @param object $question  This holds the information from the editing form,
+     *      it is not a standard question object.
+     * @return object $result->error or $result->notice
+     */
+    public function save_question_answers($question) {
+        global $DB;
+
+        $context = $question->context;
+        $oldanswers = $DB->get_records('question_answers',
+                array('question' => $question->id), 'id ASC');
+
+        // We need separate arrays for answers and extra answer data, so no JOINS there.
         $extraanswerfields = $this->extra_answer_fields();
-        // TODO save the answers, with any extra data.
+        $isextraanswerfields = is_array($extraanswerfields);
+        $extraanswertable = '';
+        $oldanswerextras = array();
+        if ($isextraanswerfields) {
+            $extraanswertable = array_shift($extraanswerfields);
+            if (!empty($oldanswers)) {
+                $oldanswerextras = $DB->get_records_sql("SELECT * FROM {{$extraanswertable}} WHERE " .
+                    'answerid IN (SELECT id FROM {question_answers} WHERE question = ' . $question->id . ')' );
+            }
+        }
+
+        // Insert all the new answers.
+        foreach ($question->answer as $key => $answerdata) {
+            // Check for, and ignore, completely blank answer from the form.
+            if ($this->is_answer_empty($question, $key)) {
+                continue;
+            }
+
+            // Update an existing answer if possible.
+            $answer = array_shift($oldanswers);
+            if (!$answer) {
+                $answer = new stdClass();
+                $answer->question = $question->id;
+                $answer->answer = '';
+                $answer->feedback = '';
+                $answer->id = $DB->insert_record('question_answers', $answer);
+            }
+
+            $answer = $this->fill_answer_fields($answer, $question, $key, $context);
+            $DB->update_record('question_answers', $answer);
+
+            if ($isextraanswerfields) {
+                // Check, if this answer contains some extra field data.
+                if ($this->is_extra_answer_fields_empty($question, $key)) {
+                    continue;
+                }
+
+                $answerextra = array_shift($oldanswerextras);
+                if (!$answerextra) {
+                    $answerextra = new stdClass();
+                    $answerextra->answerid = $answer->id;
+                    // Avoid looking for correct default for any possible DB field type
+                    // by setting real values.
+                    $answerextra = $this->fill_extra_answer_fields($answerextra, $question, $key, $context, $extraanswerfields);
+                    $answerextra->id = $DB->insert_record($extraanswertable, $answerextra);
+                } else {
+                    // Update answerid, as record may be reused from another answer.
+                    $answerextra->answerid = $answer->id;
+                    $answerextra = $this->fill_extra_answer_fields($answerextra, $question, $key, $context, $extraanswerfields);
+                    $DB->update_record($extraanswertable, $answerextra);
+                }
+            }
+        }
+
+        if ($isextraanswerfields) {
+            // Delete any left over extra answer fields records.
+            $oldanswerextraids = array();
+            foreach ($oldanswerextras as $oldextra) {
+                $oldanswerextraids[] = $oldextra->id;
+            }
+            $DB->delete_records_list($extraanswertable, 'id', $oldanswerextraids);
+        }
+
+        // Delete any left over old answer records.
+        $fs = get_file_storage();
+        foreach ($oldanswers as $oldanswer) {
+            $fs->delete_area_files($context->id, 'question', 'answerfeedback', $oldanswer->id);
+            $DB->delete_records('question_answers', array('id' => $oldanswer->id));
+        }
+    }
+
+    /**
+     * Returns true is answer with the $key is empty in the question data and should not be saved in DB.
+     *
+     * The questions using question_answers table may want to overload this. Default code will work
+     * for shortanswer and similar question types.
+     * @param object $questiondata This holds the information from the question editing form or import.
+     * @param int $key A key of the answer in question.
+     * @return bool True if answer shouldn't be saved in DB.
+     */
+    protected function is_answer_empty($questiondata, $key) {
+        return trim($questiondata->answer[$key]) == '' && $questiondata->fraction[$key] == 0 &&
+                    html_is_blank($questiondata->feedback[$key]['text']);
+    }
+
+    /**
+     * Return $answer, filling necessary fields for the question_answers table.
+     *
+     * The questions using question_answers table may want to overload this. Default code will work
+     * for shortanswer and similar question types.
+     * @param stdClass $answer Object to save data.
+     * @param object $questiondata This holds the information from the question editing form or import.
+     * @param int $key A key of the answer in question.
+     * @param object $context needed for working with files.
+     * @return $answer answer with filled data.
+     */
+    protected function fill_answer_fields($answer, $questiondata, $key, $context) {
+        $answer->answer   = $questiondata->answer[$key];
+        $answer->fraction = $questiondata->fraction[$key];
+        $answer->feedback = $this->import_or_save_files($questiondata->feedback[$key],
+                $context, 'question', 'answerfeedback', $answer->id);
+        $answer->feedbackformat = $questiondata->feedback[$key]['format'];
+        return $answer;
+    }
+
+    /**
+     * Returns true if extra answer fields for answer with the $key is empty
+     * in the question data and should not be saved in DB.
+     *
+     * Questions where extra answer fields are optional will want to overload this.
+     * @param object $questiondata This holds the information from the question editing form or import.
+     * @param int $key A key of the answer in question.
+     * @return bool True if extra answer data shouldn't be saved in DB.
+     */
+    protected function is_extra_answer_fields_empty($questiondata, $key) {
+        // No extra answer data in base class.
+        return true;
+    }
+
+    /**
+     * Return $answerextra, filling necessary fields for the extra answer fields table.
+     *
+     * The questions may want to overload it to save files or do other data processing.
+     * @param stdClass $answerextra Object to save data.
+     * @param object $questiondata This holds the information from the question editing form or import.
+     * @param int $key A key of the answer in question.
+     * @param object $context needed for working with files.
+     * @param array $extraanswerfields extra answer fields (without table name).
+     * @return $answer answerextra with filled data.
+     */
+    protected function fill_extra_answer_fields($answerextra, $questiondata, $key, $context, $extraanswerfields) {
+        foreach ($extraanswerfields as $field) {
+            // The $questiondata->$field[$key] won't work in PHP, break it down to two strings of code.
+            $fieldarray = $questiondata->$field;
+            $answerextra->$field = $fieldarray[$key];
+        }
+        return $answerextra;
     }
 
     public function save_hints($formdata, $withparts = false) {
@@ -645,15 +835,17 @@ class question_type {
 
         $extraanswerfields = $this->extra_answer_fields();
         if (is_array($extraanswerfields)) {
-            $answer_extension_table = array_shift($extraanswerfields);
+            $answerextensiontable = array_shift($extraanswerfields);
+            // Use LEFT JOIN in case not every answer has extra data.
             $question->options->answers = $DB->get_records_sql("
-                    SELECT qa.*, qax." . implode(', qax.', $extraanswerfields) . "
-                    FROM {question_answers} qa, {{$answer_extension_table}} qax
-                    WHERE qa.question = ? AND qax.answerid = qa.id
+                    SELECT qa.*, qax." . implode(', qax.', $extraanswerfields) . '
+                    FROM {question_answers} qa ' . "
+                    LEFT JOIN {{$answerextensiontable}} qax ON qa.id = qax.answerid
+                    WHERE qa.question = ?
                     ORDER BY qa.id", array($question->id));
             if (!$question->options->answers) {
                 echo $OUTPUT->notification('Failed to load question answers from the table ' .
-                        $answer_extension_table . 'for questionid ' . $question->id);
+                        $answerextensiontable . 'for questionid ' . $question->id);
                 return false;
             }
         } else {
@@ -716,6 +908,7 @@ class question_type {
         $question->stamp = $questiondata->stamp;
         $question->version = $questiondata->version;
         $question->hidden = $questiondata->hidden;
+        $question->idnumber = $questiondata->idnumber;
         $question->timecreated = $questiondata->timecreated;
         $question->timemodified = $questiondata->timemodified;
         $question->createdby = $questiondata->createdby;
@@ -795,12 +988,22 @@ class question_type {
             return;
         }
         foreach ($questiondata->options->answers as $a) {
-            $question->answers[$a->id] = new question_answer($a->id, $a->answer,
-                    $a->fraction, $a->feedback, $a->feedbackformat);
+            $question->answers[$a->id] = $this->make_answer($a);
             if (!$forceplaintextanswers) {
                 $question->answers[$a->id]->answerformat = $a->answerformat;
             }
         }
+    }
+
+    /**
+     * Create a question_answer, or an appropriate subclass for this question,
+     * from a row loaded from the database.
+     * @param object $answer the DB row from the question_answers table plus extra answer fields.
+     * @return question_answer
+     */
+    protected function make_answer($answer) {
+        return new question_answer($answer->id, $answer->answer,
+                    $answer->fraction, $answer->feedback, $answer->feedbackformat);
     }
 
     /**
@@ -852,9 +1055,27 @@ class question_type {
     }
 
     /**
-     * @param object $question
+     * Calculate the score a monkey would get on a question by clicking randomly.
+     *
+     * Some question types have significant non-zero average expected score
+     * of the response is just selected randomly. For example 50% for a
+     * true-false question. It is useful to know what this is. For example
+     * it gets shown in the quiz statistics report.
+     *
+     * For almost any open-ended question type (E.g. shortanswer or numerical)
+     * this should be 0.
+     *
+     * For selective response question types (e.g. multiple choice), you can probably compute this.
+     *
+     * For particularly complicated question types the may be impossible or very
+     * difficult to compute. In this case return null. (Or, if the expected score
+     * is very tiny even though the exact value is unknown, it may appropriate
+     * to return 0.)
+     *
+     * @param stdClass $questiondata data defining a question, as returned by
+     *      question_bank::load_question_data().
      * @return number|null either a fraction estimating what the student would
-     * score by guessing, or null, if it is not possible to estimate.
+     *      score by guessing, or null, if it is not possible to estimate.
      */
     public function get_random_guess_score($questiondata) {
         return 0;
@@ -1013,7 +1234,7 @@ class question_type {
         $expout='';
         foreach ($extraquestionfields as $field) {
             $exportedvalue = $format->xml_escape($question->options->$field);
-            $expout .= "    <$field>{$exportedvalue}</$field>\n";
+            $expout .= "    <{$field}>{$exportedvalue}</{$field}>\n";
         }
 
         $extraanswersfields = $this->extra_answer_fields();

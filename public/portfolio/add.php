@@ -22,7 +22,7 @@
  *            Martin Dougiamas <http://dougiamas.com>
  * @license http://www.gnu.org/copyleft/gpl.html GNU GPL
  */
-require_once(dirname(dirname(__FILE__)) . '/config.php');
+require_once(__DIR__ . '/../config.php');
 
 if (empty($CFG->enableportfolios)) {
     print_error('disabled', 'portfolio');
@@ -49,7 +49,7 @@ $callerformats = optional_param('callerformats', null, PARAM_TAGLIST); // Comma 
 require_login();  // this is selectively called again with $course later when we know for sure which one we're in.
 $PAGE->set_context(context_system::instance());
 $PAGE->set_url('/portfolio/add.php', array('id' => $dataid, 'sesskey' => sesskey()));
-$PAGE->set_pagelayout('standard');
+$PAGE->set_pagelayout('admin');
 $exporter = null;
 
 if ($postcontrol && $type && !$dataid) {

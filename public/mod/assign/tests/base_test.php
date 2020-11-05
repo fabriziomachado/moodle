@@ -29,6 +29,7 @@ defined('MOODLE_INTERNAL') || die();
 global $CFG;
 require_once($CFG->dirroot . '/mod/assign/locallib.php');
 require_once($CFG->dirroot . '/mod/assign/upgradelib.php');
+require_once(__DIR__ . '/fixtures/testable_assign.php');
 
 /**
  * Unit tests for (some of) mod/assign/locallib.php.
@@ -90,7 +91,7 @@ class mod_assign_base_testcase extends advanced_testcase {
 
         $this->resetAfterTest(true);
 
-        $this->course = $this->getDataGenerator()->create_course();
+        $this->course = $this->getDataGenerator()->create_course(array('enablecompletion' => 1));
         $this->teachers = array();
         for ($i = 0; $i < self::DEFAULT_TEACHER_COUNT; $i++) {
             array_push($this->teachers, $this->getDataGenerator()->create_user());
@@ -205,11 +206,13 @@ class mod_assign_base_testcase extends advanced_testcase {
      */
     protected function create_instance($params=array()) {
         $generator = $this->getDataGenerator()->get_plugin_generator('mod_assign');
-        $params['course'] = $this->course->id;
+        if (!isset($params['course'])) {
+            $params['course'] = $this->course->id;
+        }
         $instance = $generator->create_instance($params);
         $cm = get_coursemodule_from_instance('assign', $instance->id);
         $context = context_module::instance($cm->id);
-        return new testable_assign($context, $cm, $this->course);
+        return new mod_assign_testable_assign($context, $cm, $this->course);
     }
 
     public function test_create_instance() {
@@ -218,76 +221,4 @@ class mod_assign_base_testcase extends advanced_testcase {
 
 }
 
-/**
- * Test subclass that makes all the protected methods we want to test public.
- */
-class testable_assign extends assign {
-
-    public function testable_show_intro() {
-        return parent::show_intro();
-    }
-
-    public function testable_delete_grades() {
-        return parent::delete_grades();
-    }
-
-    public function testable_apply_grade_to_user($formdata, $userid, $attemptnumber) {
-        return parent::apply_grade_to_user($formdata, $userid, $attemptnumber);
-    }
-
-    public function testable_format_submission_for_log(stdClass $submission) {
-        return parent::format_submission_for_log($submission);
-    }
-
-    public function testable_get_grading_userid_list() {
-        return parent::get_grading_userid_list();
-    }
-
-    public function testable_is_graded($userid) {
-        return parent::is_graded($userid);
-    }
-
-    public function testable_update_submission(stdClass $submission, $userid, $updatetime, $teamsubmission) {
-        return parent::update_submission($submission, $userid, $updatetime, $teamsubmission);
-    }
-
-    public function testable_process_add_attempt($userid = 0) {
-        return parent::process_add_attempt($userid);
-    }
-
-    public function testable_process_save_quick_grades($postdata) {
-        // Ugly hack to get something into the method.
-        global $_POST;
-        $_POST = $postdata;
-        return parent::process_save_quick_grades();
-    }
-
-    public function testable_process_set_batch_marking_allocation($selectedusers, $markerid) {
-        // Ugly hack to get something into the method.
-        global $_POST;
-        $_POST['selectedusers'] = $selectedusers;
-        $_POST['allocatedmarker'] = $markerid;
-        return parent::process_set_batch_marking_allocation();
-    }
-
-    public function testable_process_set_batch_marking_workflow_state($selectedusers, $state) {
-        // Ugly hack to get something into the method.
-        global $_POST;
-        $_POST['selectedusers'] = $selectedusers;
-        $_POST['markingworkflowstate'] = $state;
-        return parent::process_set_batch_marking_workflow_state();
-    }
-
-    public function testable_submissions_open($userid = 0) {
-        return parent::submissions_open($userid);
-    }
-
-    public function testable_save_user_extension($userid, $extensionduedate) {
-        return parent::save_user_extension($userid, $extensionduedate);
-    }
-
-    public function testable_get_graders($userid) {
-        // Changed method from protected to public.
-        return parent::get_graders($userid);
-    }
-}
+class_alias('mod_assign_testable_assign', 'testable_assign');

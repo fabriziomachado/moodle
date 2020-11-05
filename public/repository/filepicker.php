@@ -19,7 +19,7 @@
 /**
  * This file is used to browse repositories in non-javascript mode
  *
- * @since 2.0
+ * @since Moodle 2.0
  * @package    core
  * @subpackage repository
  * @copyright  2009 Dongsheng Cai <dongsheng@moodle.com>
@@ -101,7 +101,7 @@ $home_url = new moodle_url('/repository/draftfiles_manager.php', $params);
 
 $params['savepath'] = $savepath;
 $params['repo_id'] = $repo_id;
-$url = new moodle_url($CFG->httpswwwroot."/repository/filepicker.php", $params);
+$url = new moodle_url("/repository/filepicker.php", $params);
 $PAGE->set_url('/repository/filepicker.php', $params);
 
 switch ($action) {
@@ -212,7 +212,7 @@ case 'sign':
                 // TODO MDL-28482: need a better solution
                 // paging_bar is not a good option because it starts page numbering from 0 and
                 // repositories number pages starting from 1.
-                $pagingurl = new moodle_url("$CFG->httpswwwroot/repository/filepicker.php?action=list&itemid=$itemid&ctx_id=$contextid&repo_id=$repo_id&course=$courseid&sesskey=".  sesskey());
+                $pagingurl = new moodle_url("/repository/filepicker.php?action=list&itemid=$itemid&ctx_id=$contextid&repo_id=$repo_id&course=$courseid&sesskey=".  sesskey());
                 if (!isset($list['perpage']) && !isset($list['total'])) {
                     $list['perpage'] = 10; // instead of setting perpage&total we use number of pages, the result is the same
                 }
@@ -293,7 +293,7 @@ case 'download':
     // note that in this case user may not have permission to access the source file directly
     // so no file_browser/file_info can be used below
     if ($repo->has_moodle_files()) {
-        $file = repository::get_moodle_file($fileurl);
+        $file = repository::get_moodle_file($reference);
         if ($file && $file->is_external_file()) {
             $sourcefield = $file->get_source(); // remember the original source
             $record->source = $repo::build_source_field($sourcefield);

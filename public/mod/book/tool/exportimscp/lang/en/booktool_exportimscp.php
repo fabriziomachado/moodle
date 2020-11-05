@@ -24,8 +24,9 @@
 
 defined('MOODLE_INTERNAL') || die;
 
-$string['event_book_exported'] = 'Book exported';
+$string['eventbookexported'] = 'Book exported';
 $string['exportimscp:export'] = 'Export book as IMS content package';
 $string['generateimscp'] = 'Generate IMS CP';
 $string['nochapters'] = 'No book chapters found, so unable to export to IMS CP.';
 $string['pluginname'] = 'Book IMS CP export';
+$string['privacy:metadata'] = 'The Book IMS CP export plugin does not store any personal data.';

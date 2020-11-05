@@ -35,18 +35,21 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-require_once(dirname(__FILE__) . '/../config.php');
+require_once(__DIR__ . '/../config.php');
 require_once($CFG->dirroot . '/my/lib.php');
 require_once($CFG->libdir.'/adminlib.php');
 
-$edit   = optional_param('edit', null, PARAM_BOOL);    // Turn editing on and off
-
-require_login();
+$resetall = optional_param('resetall', null, PARAM_BOOL);
 
 $header = "$SITE->shortname: ".get_string('myhome')." (".get_string('mypage', 'admin').")";
 
 $PAGE->set_blocks_editing_capability('moodle/my:configsyspages');
 admin_externalpage_setup('mypage', '', null, '', array('pagelayout' => 'mydashboard'));
+
+if ($resetall && confirm_sesskey()) {
+    my_reset_page_for_all_users(MY_PAGE_PRIVATE, 'my-index');
+    redirect($PAGE->url, get_string('alldashboardswerereset', 'my'));
+}
 
 // Override pagetype to show blocks properly.
 $PAGE->set_pagetype('my-index');
@@ -61,8 +64,13 @@ if (!$currentpage = my_get_page(null, MY_PAGE_PRIVATE)) {
 }
 $PAGE->set_subpage($currentpage->id);
 
+// Display a button to reset everyone's dashboard.
+$url = new moodle_url($PAGE->url, array('resetall' => 1));
+$button = $OUTPUT->single_button($url, get_string('reseteveryonesdashboard', 'my'));
+$PAGE->set_button($button . $PAGE->button);
+
 echo $OUTPUT->header();
 
-echo $OUTPUT->blocks_for_region('content');
+echo $OUTPUT->custom_block_region('content');
 
 echo $OUTPUT->footer();

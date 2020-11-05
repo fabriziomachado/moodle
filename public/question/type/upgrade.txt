@@ -1,5 +1,54 @@
 This files describes API changes for question type plugins.
 
+=== 3.8 ===
+
+* There is a new method for question types get_extra_question_bank_actions.
+  Assuming the question bank display is using the new 'edit_menu_column'
+  (which it will be by default) this method lets you add question-type-specific
+  actions to the menu. The question_type base class has extensive PHPdoc comments
+  on the method to explain what you should do, and there is an example of how to
+  use it in a question type at
+  https://github.com/moodleou/moodle-qtype_pmatch/commit/2aefa8b5dcc7bab768f4707a4ffb7befcf4c2540.
+
+=== 3.8, 3.7.3, 3.6.7 ===
+
+* Coming up in Moodle 3.8 are some changes to the question bank UI. These will break any
+  Behat automated tests which use the common pattern
+    When I click on "Duplicate" "link" in the "Test question" "table_row"
+  to trigger actions on questions when looking at the question bank screen. Therefore,
+  a new step has been introduced:
+    When I choose "Duplicate" action for "Test question" in the question bank
+  If you want your Behat tests to continue working with Moodle 3.8, you will need to use
+  the new step. The new step has been back-ported, so you can start updating your tests
+  and have them work with Moodle 3.6 and 3.7. In addition, if you want to trigger the
+  "Edit" action, you should change that to "Edit question".
+
+
+=== 3.5 ===
+
+  + Added new classes backup_qtype_extrafields_plugin and restore_qtype_extrafields_plugin
+   in order to use extra fields method in backup/restore question type. Require and inherit new classes for using it. See
+   backup_qtype_shortanswer_plugin and restore_qtype_shortanswer_plugin for an example of using this.
+  + The declaration of is_gradable_response has been moved from question_automatically_gradable to
+   question_manually_gradable.
+  + The default implementation of is_gradable_response has been moved from question_graded_automatically to
+   question_with_responses.
+  + Note that format_text() is no longer applied to the results of
+   qtype_elements_embedded_in_question_text_renderer::embedded_element(). If question type overrides
+   this method make sure you apply format_text() to any text that came from a user.
+
+=== 3.1.5, 3.2.2, 3.3 ===
+
+* If you are using check_combined_feedback_file_access in your check_file_access method,
+  then you must now pass $args as the 4th argument, so the correct permission checks
+  can be performed. If you don't, you will get a developer debug notice.
+
+=== 3.1 ===
+
+* The following functions, previously used (exclusively) by upgrade steps are not available
+  anymore because of the upgrade cleanup performed for this version. See MDL-51580 for more info:
+    - qtype_essay_convert_to_html()
+
 === 2.7 ===
   + We have added a new method to the question_type base class 'break_down_stats_and_response_analysis_by_variant'. By default it
    returns true. If your question type does not have variants of question instances then you can ignore this method as it only
@@ -7,7 +56,17 @@ This files describes API changes for question type plugins.
    response analysis and question stats by variant. But for some question types there might be an almost infinite quantity of
    variants for the question, in this case you can suppress break down by variant by returning false from this method. See for
    example the non-core question type varnumeric or the slightly more complex stack question type.
-
+  + We have added a pair of methods to the question_definition class 'prepare_simulated_post_data' and
+  'get_student_response_values_for_simulation'. You may want to override these methods in question.php in your question type plug
+   -in. These methods are used to convert data from a csv file of simulated step data into the simulated post data that is fed
+   to the question engine. These csv files can be used for unit testing or manual testing the use of your question type within the
+   quiz module.  You  can use the simulate quiz report for manual testing and also to easily generate csv test files. You can
+   run a number of students through a test and then download a csv file representing their interaction with the quiz. For most
+   question types the default of just passing csv data as post data, directly from the csv file will probably work fine. But for
+   certain question types where the meaning of the post data is deliberately obfuscated it might be necessary to convert from a
+   human friendly format in the csv file to response data expected by the question type using 'prepare_simulated_post_data' and
+   to convert back from a question type response array to values for download in a csv file using
+   'get_student_response_values_for_simulation'.
 === 2.6 ===
   + The changes in MDL-32750 were reverted in favour of the new pdw toggle toolbars
     plugin for TinyMCE. The get_non_collapsible_editor_options method has been deprecated.

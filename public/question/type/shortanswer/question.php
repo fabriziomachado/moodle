@@ -26,6 +26,7 @@
 
 defined('MOODLE_INTERNAL') || die();
 
+require_once($CFG->dirroot . '/question/type/questionbase.php');
 
 /**
  * Represents a short answer question.
@@ -53,6 +54,14 @@ class qtype_shortanswer_question extends question_graded_by_strategy
             return $response['answer'];
         } else {
             return null;
+        }
+    }
+
+    public function un_summarise_response(string $summary) {
+        if (!empty($summary)) {
+            return ['answer' => $summary];
+        } else {
+            return [];
         }
     }
 

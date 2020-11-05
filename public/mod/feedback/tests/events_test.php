@@ -135,8 +135,10 @@ class mod_feedback_events_testcase extends advanced_testcase {
         // Test can_view() .
         $this->setUser($this->eventuser);
         $this->assertFalse($event->can_view());
+        $this->assertDebuggingCalled();
         $this->setAdminUser();
         $this->assertTrue($event->can_view());
+        $this->assertDebuggingCalled();
 
         // Create a response, with anonymous set to no and test can_view().
         $response = new stdClass();
@@ -162,8 +164,10 @@ class mod_feedback_events_testcase extends advanced_testcase {
         // Test can_view() .
         $this->setUser($this->eventuser);
         $this->assertTrue($event->can_view());
+        $this->assertDebuggingCalled();
         $this->setAdminUser();
         $this->assertTrue($event->can_view());
+        $this->assertDebuggingCalled();
         $this->assertEventContextNotUsed($event);
     }
 
@@ -180,12 +184,13 @@ class mod_feedback_events_testcase extends advanced_testcase {
         try {
             \mod_feedback\event\response_submitted::create(array(
                 'context'  => $context,
-                'objectid' => $this->eventfeedbackcompleted->id
+                'objectid' => $this->eventfeedbackcompleted->id,
+                'relateduserid' => 2,
             ));
             $this->fail("Event validation should not allow \\mod_feedback\\event\\response_deleted to be triggered without
                     other['anonymous']");
         } catch (coding_exception $e) {
-            $this->assertContains("Field other['anonymous'] cannot be empty", $e->getMessage());
+            $this->assertContains("The 'anonymous' value must be set in other.", $e->getMessage());
         }
     }
 
@@ -213,7 +218,7 @@ class mod_feedback_events_testcase extends advanced_testcase {
 
         // Save the feedback.
         $sink = $this->redirectEvents();
-        $id = feedback_save_tmp_values($completed, false, $USER->id);
+        $id = feedback_save_tmp_values($completed, false);
         $events = $sink->get_events();
         $event = array_pop($events); // Response submitted feedback event.
         $sink->close();
@@ -224,11 +229,14 @@ class mod_feedback_events_testcase extends advanced_testcase {
         $this->assertEquals($USER->id, $event->userid);
         $this->assertEquals($USER->id, $event->relateduserid);
         $this->assertEquals('feedback_completed', $event->objecttable);
+        $this->assertEquals(1, $event->anonymous);
         $this->assertEquals(FEEDBACK_ANONYMOUS_YES, $event->other['anonymous']);
         $this->setUser($this->eventuser);
         $this->assertFalse($event->can_view());
+        $this->assertDebuggingCalled();
         $this->setAdminUser();
         $this->assertTrue($event->can_view());
+        $this->assertDebuggingCalled();
 
         // Test legacy data.
         $this->assertEventLegacyLogData(null, $event);
@@ -249,25 +257,27 @@ class mod_feedback_events_testcase extends advanced_testcase {
 
         // Save the feedback.
         $sink = $this->redirectEvents();
-        feedback_save_tmp_values($completed, false, $USER->id);
+        feedback_save_tmp_values($completed, false);
         $events = $sink->get_events();
         $event = array_pop($events); // Response submitted feedback event.
         $sink->close();
 
         // Test legacy data.
         $arr = array($this->eventcourse->id, 'feedback', 'submit', 'view.php?id=' . $this->eventcm->id, $this->eventfeedback->id,
-                     $this->eventcm->id, $USER->id);
+                     $this->eventcm->id, $this->eventuser->id);
         $this->assertEventLegacyLogData($arr, $event);
 
         // Test can_view().
         $this->assertTrue($event->can_view());
+        $this->assertDebuggingCalled();
         $this->setAdminUser();
         $this->assertTrue($event->can_view());
+        $this->assertDebuggingCalled();
         $this->assertEventContextNotUsed($event);
     }
 
     /**
-     * Tests for event validations related to feedback response submittion.
+     * Tests for event validations related to feedback response submission.
      */
     public function test_response_submitted_event_exceptions() {
 
@@ -280,12 +290,14 @@ class mod_feedback_events_testcase extends advanced_testcase {
             \mod_feedback\event\response_submitted::create(array(
                 'context'  => $context,
                 'objectid' => $this->eventfeedbackcompleted->id,
+                'relateduserid' => 2,
+                'anonymous' => 0,
                 'other'    => array('cmid' => $this->eventcm->id, 'anonymous' => 2)
             ));
             $this->fail("Event validation should not allow \\mod_feedback\\event\\response_deleted to be triggered without
                     other['instanceid']");
         } catch (coding_exception $e) {
-            $this->assertContains("Field other['instanceid'] cannot be empty", $e->getMessage());
+            $this->assertContains("The 'instanceid' value must be set in other.", $e->getMessage());
         }
 
         // Test not setting cmid.
@@ -293,12 +305,14 @@ class mod_feedback_events_testcase extends advanced_testcase {
             \mod_feedback\event\response_submitted::create(array(
                 'context'  => $context,
                 'objectid' => $this->eventfeedbackcompleted->id,
+                'relateduserid' => 2,
+                'anonymous' => 0,
                 'other'    => array('instanceid' => $this->eventfeedback->id, 'anonymous' => 2)
             ));
             $this->fail("Event validation should not allow \\mod_feedback\\event\\response_deleted to be triggered without
                     other['cmid']");
         } catch (coding_exception $e) {
-            $this->assertContains("Field other['cmid'] cannot be empty", $e->getMessage());
+            $this->assertContains("The 'cmid' value must be set in other.", $e->getMessage());
         }
 
         // Test not setting anonymous.
@@ -306,13 +320,27 @@ class mod_feedback_events_testcase extends advanced_testcase {
             \mod_feedback\event\response_submitted::create(array(
                  'context'  => $context,
                  'objectid' => $this->eventfeedbackcompleted->id,
+                 'relateduserid' => 2,
                  'other'    => array('cmid' => $this->eventcm->id, 'instanceid' => $this->eventfeedback->id)
             ));
             $this->fail("Event validation should not allow \\mod_feedback\\event\\response_deleted to be triggered without
                     other['anonymous']");
         } catch (coding_exception $e) {
-            $this->assertContains("Field other['anonymous'] cannot be empty", $e->getMessage());
+            $this->assertContains("The 'anonymous' value must be set in other.", $e->getMessage());
         }
+    }
+
+    /**
+     * Test that event observer is executed on course deletion and the templates are removed.
+     */
+    public function test_delete_course() {
+        global $DB;
+        $this->resetAfterTest();
+        feedback_save_as_template($this->eventfeedback, 'my template', 0);
+        $courseid = $this->eventcourse->id;
+        $this->assertNotEmpty($DB->get_records('feedback_template', array('course' => $courseid)));
+        delete_course($this->eventcourse, false);
+        $this->assertEmpty($DB->get_records('feedback_template', array('course' => $courseid)));
     }
 }
 
